@@ -80,17 +80,19 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         session = started;
         activityAt = new Date(now);
       } else if (action === 'answer' && session?.status === 'in_progress') {
+        const normalized = normalizeAnswer(input!);
         const [[answer]] = await connection.execute<RowDataPacket[]>(
           'SELECT a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_key = ?',
-          [session.challenge_date, normalizeAnswer(input!)],
+          [session.challenge_date, normalized],
         );
         const [[duplicate]] = answer ? await connection.execute<RowDataPacket[]>(
           "SELECT submission_id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND outcome = 'correct'", [session.session_id, answer.answer_id],
         ) : [[]];
         const outcome = !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
         await connection.execute(
-          'INSERT INTO player_submissions (session_id, challenge_date, submitted_at_utc, guess, outcome, answer_id) VALUES (?, ?, ?, ?, ?, ?)',
-          [session.session_id, session.challenge_date, new Date(now), input, outcome, answer?.answer_id ?? null],
+          'INSERT INTO player_submissions (session_id, challenge_date, submitted_at_utc, guess, normalized_text, response_time_ms, outcome, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [session.session_id, session.challenge_date, new Date(now), input, normalized,
+            Math.max(0, now - session.started_at_utc.getTime()), outcome, answer?.answer_id ?? null],
         );
         accepted = outcome === 'correct';
         await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE session_id = ?', [session.session_id]);

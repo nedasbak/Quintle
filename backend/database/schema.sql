@@ -106,7 +106,9 @@ CREATE TABLE IF NOT EXISTS player_submissions (
     session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_date DATE NOT NULL,
     submitted_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
-    guess VARCHAR(191) NOT NULL,
+    guess VARCHAR(255) NOT NULL,
+    normalized_text VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,
+    response_time_ms INT UNSIGNED NOT NULL,
     outcome ENUM('correct', 'duplicate', 'incorrect') NOT NULL,
     answer_id BIGINT UNSIGNED DEFAULT NULL,
     credited_answer_id BIGINT UNSIGNED GENERATED ALWAYS AS (
@@ -115,6 +117,8 @@ CREATE TABLE IF NOT EXISTS player_submissions (
     UNIQUE KEY uq_submission_credit (session_id, credited_answer_id),
     KEY ix_submission_session_order (session_id, submission_id),
     KEY ix_submission_rarity (challenge_date, outcome, answer_id),
+    KEY ix_submission_received (session_id, submitted_at_utc),
+    KEY ix_submission_answer_result (answer_id, outcome),
     CONSTRAINT fk_submission_session FOREIGN KEY (session_id, challenge_date)
         REFERENCES game_sessions (session_id, challenge_date),
     CONSTRAINT fk_submission_answer FOREIGN KEY (challenge_date, answer_id)

@@ -9,6 +9,7 @@ import { createApp } from '../src/app.ts';
 import { createGameService } from '../src/game.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
 import { getDailyChallenge } from '../../shared/challenges.mjs';
+import { migrateSubmissionDetails } from '../database/migrations/010_submission_details.ts';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -404,6 +405,44 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const [scores] = await pool.query<RowDataPacket[]>("SHOW INDEX FROM game_sessions WHERE Key_name = 'ix_session_challenge_score'");
     assert.deepEqual(scores.map(index => index.Column_name), ['challenge_id', 'score']);
     assert.equal(scores[1].Collation, 'D');
+    assert.deepEqual((await client.request()).data, original);
+  });
+  it('preserves raw guesses and backfills Unicode normalization and response times', async () => {
+    const client = player();
+    const started = (await client.request('/start', {})).data.game.startedAt;
+    now += 1234;
+    assert.equal((await answer(client, '  BÚRMA\t')).data.accepted, true);
+    now += 500;
+    assert.equal((await answer(client, 'Myanmar')).data.accepted, false);
+    await answer(client, 'Moon\u00a0 \t');
+    assert.equal((await answer(client, '\uFDFA'.repeat(80))).status, 400);
+    const [rows] = await pool.execute<RowDataPacket[]>(`SELECT s.* FROM player_submissions s JOIN game_sessions g ON g.session_id = s.session_id
+      JOIN players p ON p.id = g.player_id WHERE p.token_hash = ? ORDER BY s.submission_id`, [client.hash]);
+    assert.deepEqual(rows.map(row => [row.guess, row.normalized_text, row.response_time_ms, row.outcome]), [
+      ['  BÚRMA\t', 'burma', 1234, 'correct'], ['Myanmar', 'myanmar', 1734, 'duplicate'], ['Moon\u00a0 \t', 'moon', 1734, 'incorrect'],
+    ]);
+    now = started + 5049;
+    for (const value of ['Mexico', 'Malta', 'Morocco', 'Mali']) await answer(client, value);
+    const original = (await client.request()).data;
+    assert.equal(original.game.score.total, 749);
+    const connection = await pool.getConnection();
+    try {
+      await connection.query("SET time_zone = '+00:00'");
+      const legacy = Array.from({ length: 501 }, (_, i) => [rows[0].session_id, rows[0].challenge_date,
+        new Date(started + 2000), `  Legacy ${i}  `, `legacy ${i}`, 2000, 'incorrect']);
+      await connection.query(`INSERT INTO player_submissions
+        (session_id, challenge_date, submitted_at_utc, guess, normalized_text, response_time_ms, outcome) VALUES ?`, [legacy]);
+      await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + ? WHERE session_id = ?', [legacy.length, rows[0].session_id]);
+      const snapshot = async () => Promise.all([['game_sessions', 'session_id'], ['player_submissions', 'submission_id'], ['players', 'id']]
+        .map(async ([table, key]) => (await connection.query(`SELECT * FROM ${table} ORDER BY ${key}`))[0]));
+      const before = await snapshot();
+      await connection.query(`ALTER TABLE player_submissions DROP INDEX ix_submission_received, DROP INDEX ix_submission_answer_result,
+        DROP COLUMN normalized_text, DROP COLUMN response_time_ms, MODIFY COLUMN guess VARCHAR(191) NOT NULL`);
+      await migrateSubmissionDetails(connection);
+      assert.deepEqual(await snapshot(), before);
+      const [indexes] = await connection.query<RowDataPacket[]>("SHOW INDEX FROM player_submissions WHERE Key_name = 'ix_submission_received'");
+      assert.deepEqual(indexes.map(index => index.Column_name), ['session_id', 'submitted_at_utc']);
+    } finally { connection.release(); }
     assert.deepEqual((await client.request()).data, original);
   });
   it('adds challenge metadata to an existing database without losing content', async () => {

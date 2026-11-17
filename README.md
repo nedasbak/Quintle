@@ -79,8 +79,11 @@ time remaining, creation timestamps, and submission counts. Counts include corre
 and duplicate guesses. Deadlines and completion time remain derived from server timestamps.
 Apply `backend/database/migrations/009_session_challenges.sql` next to link existing sessions
 to challenge IDs, enforce one attempt per player and challenge, and index scores by challenge.
+With `DATABASE_URL` set, run `node backend/database/migrations/010_submission_details.ts`
+after 009, with the API stopped and a backup. It backfills Unicode-normalized guesses,
+millisecond response times, and submission indexes while preserving original input.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session field names/settings and submission details remain to be updated.
+Session/submission field names, expired guesses, and challenge availability settings remain to be updated.
 
 ## Scoring and tests
 
