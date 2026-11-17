@@ -52,6 +52,11 @@ validates answers and aliases, and determines elapsed time. Refreshing or restar
 does not restart an attempt. The existing curated categories initialize missing daily content;
 database content already present is preserved.
 
+`backend/database/seed.sql` populates 30 UTC days starting today, using three rotating
+starter categories with accepted answers and aliases. Run it after `schema.sql`;
+re-running it preserves existing dates and player data. Replace starter content before launch.
+`.env.example` documents settings for the upcoming local container setup on port 3307.
+
 ## Scoring and tests
 
 The score is `floor(correct answers × 100 + remaining milliseconds / 1000 × 10)`.
