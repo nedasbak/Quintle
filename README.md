@@ -95,8 +95,10 @@ Then apply `backend/database/migrations/015_session_answer_count.sql` to rename 
 to `correct_answers`, preserving stored counts, precise scoring, and session state checks.
 Apply `backend/database/migrations/016_session_timestamps.sql` next to rename the session
 timestamps to `started_at` and `finished_at`. Values remain UTC with millisecond precision.
+Then apply `backend/database/migrations/017_session_statuses.sql` to map session states to
+`active`, `completed`, and `expired`. Existing game timing, scores, and history are preserved.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session statuses and challenge availability settings remain to be updated.
+Challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

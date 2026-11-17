@@ -60,20 +60,20 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     started_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
     expires_at DATETIME(3) GENERATED ALWAYS AS (started_at + INTERVAL 30 SECOND) STORED,
     finished_at DATETIME(3) DEFAULT NULL,
-    status ENUM('in_progress', 'solved', 'timed_out') NOT NULL DEFAULT 'in_progress',
+    status ENUM('active', 'completed', 'expired') NOT NULL DEFAULT 'active',
     correct_answers TINYINT UNSIGNED NOT NULL DEFAULT 0,
     total_submissions INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     remaining_time_ms INT UNSIGNED GENERATED ALWAYS AS (
-        CASE WHEN status = 'solved' THEN 30000 - TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) DIV 1000 ELSE 0 END
+        CASE WHEN status = 'completed' THEN 30000 - TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) DIV 1000 ELSE 0 END
     ) STORED,
     -- Milisekundžių tikslumas išsaugomas iki galutinio taškų apvalinimo.
     remaining_seconds DECIMAL(5,3) UNSIGNED GENERATED ALWAYS AS (
         CASE status
-            WHEN 'solved' THEN 30 - (
+            WHEN 'completed' THEN 30 - (
                 TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) / 1000000
             )
-            WHEN 'timed_out' THEN 0
+            WHEN 'expired' THEN 0
         END
     ) STORED,
     score SMALLINT UNSIGNED GENERATED ALWAYS AS (
@@ -91,12 +91,12 @@ CREATE TABLE IF NOT EXISTS game_sessions (
         REFERENCES daily_challenges (id, challenge_date),
     CONSTRAINT ck_session_start_day CHECK (DATE(started_at) = challenge_date),
     CONSTRAINT ck_session_state CHECK (
-        (status = 'in_progress' AND finished_at IS NULL AND correct_answers < 5)
-        OR (status = 'solved' AND correct_answers = 5
+        (status = 'active' AND finished_at IS NULL AND correct_answers < 5)
+        OR (status = 'completed' AND correct_answers = 5
             AND finished_at IS NOT NULL
             AND finished_at >= started_at
             AND finished_at < started_at + INTERVAL 30 SECOND)
-        OR (status = 'timed_out' AND correct_answers < 5
+        OR (status = 'expired' AND correct_answers < 5
             AND finished_at IS NOT NULL
             AND finished_at = started_at + INTERVAL 30 SECOND)
     )

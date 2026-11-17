@@ -10,7 +10,7 @@ interface Session extends RowDataPacket {
   started_at: Date;
   expires_at: Date;
   finished_at: Date | null;
-  status: 'in_progress' | 'solved' | 'timed_out';
+  status: 'active' | 'completed' | 'expired';
   correct_answers: number;
   score: number | null;
 }
@@ -52,7 +52,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const today = getDailyChallenge(now).date;
       await ensureChallenge(connection, now);
       const [[active]] = await connection.execute<Session[]>(
-        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY started_at DESC, id DESC LIMIT 1 FOR UPDATE",
+        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'active' ORDER BY started_at DESC, id DESC LIMIT 1 FOR UPDATE",
         [player.player_id],
       );
       const [[daily]] = active ? [[]] : await connection.execute<Session[]>(
@@ -64,10 +64,10 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       let feedback = { kind: 'hint', text: 'You’ve got this. Enter your first answer.' };
 
       // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
-      if (session?.status === 'in_progress' && now >= session.expires_at.getTime()) {
-        await connection.execute("UPDATE game_sessions SET status = 'timed_out', finished_at = ? WHERE id = ?",
+      if (session?.status === 'active' && now >= session.expires_at.getTime()) {
+        await connection.execute("UPDATE game_sessions SET status = 'expired', finished_at = ? WHERE id = ?",
           [session.expires_at, session.id]);
-        session.status = 'timed_out';
+        session.status = 'expired';
         feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
       }
       if (action === 'start' && !session) {
@@ -79,8 +79,8 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE id = ?', [sessionId]);
         session = started;
         activityAt = new Date(now);
-      } else if (action === 'answer' && session && session.status !== 'solved') {
-        const expired = session.status === 'timed_out';
+      } else if (action === 'answer' && session && session.status !== 'completed') {
+        const expired = session.status === 'expired';
         const normalized = normalizeAnswer(input!);
         const [[answer]] = expired ? [[]] : await connection.execute<RowDataPacket[]>(
           'SELECT a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_key = ?',
@@ -101,7 +101,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         if (accepted) {
           const count = session.correct_answers + 1;
           await connection.execute('UPDATE game_sessions SET correct_answers = ?, status = ?, finished_at = ? WHERE id = ?',
-            [count, count === MAX_ANSWERS ? 'solved' : 'in_progress', count === MAX_ANSWERS ? new Date(now) : null, session.id]);
+            [count, count === MAX_ANSWERS ? 'completed' : 'active', count === MAX_ANSWERS ? new Date(now) : null, session.id]);
           feedback = { kind: 'success', text: count === MAX_ANSWERS ? 'Five for five. Beautifully done.' : `${answer!.display_answer} is in. Keep going!` };
         } else {
           feedback = { kind: 'error', text: expired ? 'Time is up. That answer arrived too late.'
