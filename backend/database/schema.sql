@@ -4,7 +4,15 @@ USE quintle;
 CREATE TABLE IF NOT EXISTS daily_challenges (
     challenge_date DATE PRIMARY KEY,
     category VARCHAR(100) NOT NULL,
-    prompt VARCHAR(255) NOT NULL
+    prompt VARCHAR(255) NOT NULL,
+    time_limit INT UNSIGNED NOT NULL DEFAULT 30,
+    required_answers INT UNSIGNED NOT NULL DEFAULT 5,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT ck_challenge_time_limit CHECK (time_limit > 0),
+    CONSTRAINT ck_challenge_required_answers CHECK (required_answers > 0),
+    CONSTRAINT ck_challenge_active CHECK (is_active IN (0, 1))
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS accepted_answers (
     answer_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

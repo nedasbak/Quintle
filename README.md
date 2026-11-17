@@ -27,6 +27,11 @@ also apply `backend/database/migrations/001_precise_scoring.sql` once; `CREATE T
 does not update existing generated columns. The migration preserves sessions and recalculates
 their scores using the original timestamps.
 
+Existing databases also need `backend/database/migrations/002_challenge_metadata.sql`
+once to add challenge settings and timestamps. Fresh imports already include these fields.
+These settings are stored metadata for now: gameplay still uses 30 seconds and five answers,
+and the API does not yet use `is_active` to control availability.
+
 Set the connection URL in your shell (replace the placeholders with your database settings;
 URL-encode special characters in the username/password):
 

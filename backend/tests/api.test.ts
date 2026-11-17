@@ -148,4 +148,33 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const [after] = await pool.query<RowDataPacket[]>('SELECT session_id, score FROM game_sessions ORDER BY session_id');
     assert.deepEqual(after, before);
   });
+  it('adds challenge metadata to an existing database without losing content', async () => {
+    const [before] = await pool.query<RowDataPacket[]>('SELECT challenge_date, category, prompt FROM daily_challenges ORDER BY challenge_date');
+    await pool.query(`ALTER TABLE daily_challenges
+      DROP CHECK ck_challenge_time_limit, DROP CHECK ck_challenge_required_answers, DROP CHECK ck_challenge_active,
+      DROP COLUMN time_limit, DROP COLUMN required_answers, DROP COLUMN is_active,
+      DROP COLUMN created_at, DROP COLUMN updated_at`);
+    await pool.query(await readFile(new URL('../database/migrations/002_challenge_metadata.sql', import.meta.url), 'utf8'));
+    const [after] = await pool.query<RowDataPacket[]>('SELECT challenge_date, category, prompt FROM daily_challenges ORDER BY challenge_date');
+    assert.deepEqual(after, before);
+    const [metadata] = await pool.query<RowDataPacket[]>('SELECT time_limit, required_answers, is_active, created_at, updated_at FROM daily_challenges');
+    assert.ok(metadata.length > 0);
+    for (const row of metadata) {
+      assert.equal(row.time_limit, 30);
+      assert.equal(row.required_answers, 5);
+      assert.equal(row.is_active, 1);
+      assert.ok(Number.isFinite(row.created_at.getTime()));
+      assert.ok(Number.isFinite(row.updated_at.getTime()));
+    }
+    for (const column of ['time_limit', 'required_answers', 'is_active']) {
+      const invalid = column === 'is_active' ? 2 : 0;
+      await assert.rejects(pool.query(`UPDATE daily_challenges SET ${column} = ${invalid}`), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+    }
+    const date = before[0].challenge_date;
+    await pool.execute("UPDATE daily_challenges SET updated_at = '2000-01-01 00:00:00' WHERE challenge_date = ?", [date]);
+    await pool.execute('UPDATE daily_challenges SET time_limit = 45 WHERE challenge_date = ?', [date]);
+    const [[changed]] = await pool.query<RowDataPacket[]>('SELECT updated_at FROM daily_challenges WHERE challenge_date = ?', [date]);
+    assert.ok(changed.updated_at.getTime() > Date.parse('2000-01-01T00:00:00Z'));
+    await pool.execute('UPDATE daily_challenges SET time_limit = 30 WHERE challenge_date = ?', [date]);
+  });
 });
