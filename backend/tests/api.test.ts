@@ -148,6 +148,39 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const [after] = await pool.query<RowDataPacket[]>('SELECT session_id, score FROM game_sessions ORDER BY session_id');
     assert.deepEqual(after, before);
   });
+  it('migrates challenge IDs without losing answers, aliases, sessions, or scores', async () => {
+    const snapshot = async () => Promise.all(['daily_challenges', 'accepted_answers', 'answer_keys', 'game_sessions', 'player_submissions'].map(async table => {
+      const [rows] = await pool.query<RowDataPacket[]>(`SELECT * FROM ${table}`);
+      return rows.map(({ id, challenge_id, created_at, updated_at, ...row }) => row);
+    }));
+    const before = await snapshot();
+    await pool.query('ALTER TABLE accepted_answers DROP FOREIGN KEY fk_answer_challenge');
+    await pool.query(`ALTER TABLE accepted_answers
+      DROP INDEX uq_answer_display,
+      DROP COLUMN challenge_id, DROP COLUMN created_at,
+      ADD UNIQUE KEY uq_answer_display (challenge_date, display_answer),
+      ADD CONSTRAINT fk_answer_challenge FOREIGN KEY (challenge_date) REFERENCES daily_challenges (challenge_date)`);
+    await pool.query(`ALTER TABLE daily_challenges
+      DROP PRIMARY KEY, DROP INDEX uq_challenge_id_date, DROP COLUMN id, ADD PRIMARY KEY (challenge_date)`);
+    await pool.query('ALTER TABLE daily_challenges DROP INDEX uq_challenge_date');
+    const migration = await readFile(new URL('../database/migrations/003_challenge_ids.sql', import.meta.url), 'utf8');
+    for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
+    assert.deepEqual(await snapshot(), before);
+    const [links] = await pool.query<RowDataPacket[]>(`SELECT a.answer_id, a.challenge_id, c.id, a.created_at
+      FROM accepted_answers a JOIN daily_challenges c ON c.challenge_date = a.challenge_date`);
+    assert.ok(links.length > 0);
+    for (const link of links) {
+      assert.equal(link.challenge_id, link.id);
+      assert.ok(Number.isFinite(link.created_at.getTime()));
+    }
+    const other = links.find(link => link.id !== links[0].id)!;
+    assert.ok(other);
+    await assert.rejects(pool.execute('UPDATE accepted_answers SET challenge_id = ? WHERE answer_id = ?',
+      [other.id, links[0].answer_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    const client = player();
+    await client.request('/start', {});
+    assert.equal((await answer(client, 'Burma')).data.accepted, true);
+  });
   it('adds challenge metadata to an existing database without losing content', async () => {
     const [before] = await pool.query<RowDataPacket[]>('SELECT challenge_date, category, prompt FROM daily_challenges ORDER BY challenge_date');
     await pool.query(`ALTER TABLE daily_challenges

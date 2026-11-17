@@ -70,9 +70,10 @@ SELECT challenge_date,
            WHEN 2 THEN 'Name 5 countries in South America'
        END
 FROM quintle_seed_days;
-INSERT INTO accepted_answers (challenge_date, display_answer)
-SELECT d.challenge_date, a.display_answer
-FROM quintle_seed_days d JOIN quintle_seed_answers a ON a.template_id = d.template_id;
+INSERT INTO accepted_answers (challenge_id, challenge_date, display_answer)
+SELECT c.id, d.challenge_date, a.display_answer
+FROM quintle_seed_days d JOIN quintle_seed_answers a ON a.template_id = d.template_id
+JOIN daily_challenges c ON c.challenge_date = d.challenge_date;
 INSERT INTO answer_keys (challenge_date, normalized_answer, answer_id)
 SELECT a.challenge_date, LOWER(a.display_answer), a.answer_id
 FROM accepted_answers a JOIN quintle_seed_days d ON d.challenge_date = a.challenge_date;

@@ -24,7 +24,8 @@ async function ensureChallenge(connection: PoolConnection, now: number) {
   if (!insert.affectedRows) return;
   for (const variants of challenge.answers) {
     const [answer] = await connection.execute<ResultSetHeader>(
-      'INSERT INTO accepted_answers (challenge_date, display_answer) VALUES (?, ?)', [challenge.date, variants[0]],
+      'INSERT INTO accepted_answers (challenge_id, challenge_date, display_answer) VALUES (?, ?, ?)',
+      [insert.insertId, challenge.date, variants[0]],
     );
     for (const key of new Set(variants.map(normalizeAnswer))) {
       await connection.execute('INSERT INTO answer_keys (challenge_date, normalized_answer, answer_id) VALUES (?, ?, ?)',

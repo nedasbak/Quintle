@@ -2,7 +2,8 @@ CREATE DATABASE IF NOT EXISTS quintle
     CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 USE quintle;
 CREATE TABLE IF NOT EXISTS daily_challenges (
-    challenge_date DATE PRIMARY KEY,
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    challenge_date DATE NOT NULL,
     category VARCHAR(100) NOT NULL,
     prompt VARCHAR(255) NOT NULL,
     time_limit INT UNSIGNED NOT NULL DEFAULT 30,
@@ -10,18 +11,22 @@ CREATE TABLE IF NOT EXISTS daily_challenges (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uq_challenge_date (challenge_date),
+    UNIQUE KEY uq_challenge_id_date (id, challenge_date),
     CONSTRAINT ck_challenge_time_limit CHECK (time_limit > 0),
     CONSTRAINT ck_challenge_required_answers CHECK (required_answers > 0),
     CONSTRAINT ck_challenge_active CHECK (is_active IN (0, 1))
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS accepted_answers (
     answer_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    challenge_id BIGINT UNSIGNED NOT NULL,
     challenge_date DATE NOT NULL,
     display_answer VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     UNIQUE KEY uq_answer_challenge_id (challenge_date, answer_id),
-    UNIQUE KEY uq_answer_display (challenge_date, display_answer),
-    CONSTRAINT fk_answer_challenge FOREIGN KEY (challenge_date)
-        REFERENCES daily_challenges (challenge_date)
+    UNIQUE KEY uq_answer_display (challenge_id, display_answer),
+    CONSTRAINT fk_answer_challenge FOREIGN KEY (challenge_id, challenge_date)
+        REFERENCES daily_challenges (id, challenge_date)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS answer_keys (
     challenge_date DATE NOT NULL,
