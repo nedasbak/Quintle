@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowUp, CircleHelp, Trophy } from 'lucide-react';
 import Dialog from './components/Dialog.jsx';
 import AnswerSlots from './features/game/AnswerSlots.jsx';
@@ -7,8 +7,21 @@ import Results from './features/game/Results.jsx';
 import { getScoreBreakdown } from './features/game/scoring.js';
 import { getResults, getStatistics } from './features/game/storage.js';
 import useGame from './features/game/useGame.js';
+import SharedResults from './features/game/SharedResults.jsx';
+import { readResultLink } from './features/game/resultLinks.js';
+
+function subscribeToHash(callback) {
+  window.addEventListener('hashchange', callback);
+  return () => window.removeEventListener('hashchange', callback);
+}
 
 export default function App() {
+  const hash = useSyncExternalStore(subscribeToHash, () => window.location.hash);
+  const result = useMemo(() => readResultLink(hash), [hash]);
+  return result.kind === 'none' ? <GameApp /> : <SharedResults key={hash} result={result} />;
+}
+
+function GameApp() {
   const { game, now, remaining, feedback, start, submit } = useGame();
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);

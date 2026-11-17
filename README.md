@@ -34,3 +34,5 @@ Use `npm` instead of `npm.cmd` outside Windows PowerShell.
 The game UI runs locally with sample challenges and browser-saved progress. Express and server validation will be added later.
 
 Rarity bonuses use sample pick rates for the frontend preview, not real player data.
+
+Share results copies a match link. Shared matches open without browser storage; answers stay hidden until revealed. Links use the current site address, so deploy the frontend to share beyond localhost.

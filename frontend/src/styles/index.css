@@ -108,6 +108,9 @@ h1 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.4; text-wrap: 
 .share-button svg:last-child { margin-left: auto; }
 .share-button svg:first-child { margin-right: auto; }
 .share-status { min-height: 18px; text-align: center; color: #a5b6c1; font-size: 11px; margin: 9px 0 0; }
+.result-link { display: block; padding: 13px 8px; color: var(--lime); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+.result-link:hover { text-decoration: underline; }
+.play-today-link { margin: 20px 0; text-decoration: none; }
 .share-fallback { width: 100%; min-height: 124px; padding: 12px; margin-top: 12px; border: 1px solid #4b5b4f; border-radius: 10px; background: var(--surface); color: #d1e6bd; font-size: 13px; resize: vertical; }
 .next-challenge { color: #a6b4be; text-align: center; margin-top: 19px; font-size: 11px; }
 .next-challenge strong { color: var(--lime); font-weight: 500; font-variant-numeric: tabular-nums; }

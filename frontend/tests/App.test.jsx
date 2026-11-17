@@ -103,6 +103,9 @@ describe('main game interface', () => {
     const shared = writeText.mock.calls[0][0];
     expect(shared).toContain('1/5 · 100 points');
     expect(shared).not.toContain('Mexico');
+    const matchLink = shared.split('\n').at(-1);
+    expect(new URL(matchLink).hash).toMatch(/^#results=/);
+    expect(screen.getByRole('link', { name: 'View match results' })).toHaveAttribute('href', matchLink);
     expect(screen.getByText('Copied to clipboard!')).toBeInTheDocument();
   });
 
