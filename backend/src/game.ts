@@ -87,15 +87,15 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
           [session.challenge_date, normalized],
         );
         const [[duplicate]] = answer ? await connection.execute<RowDataPacket[]>(
-          "SELECT submission_id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND outcome = 'correct'", [session.session_id, answer.answer_id],
+          "SELECT id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND result = 'correct'", [session.session_id, answer.answer_id],
         ) : [[]];
-        const outcome = expired ? 'expired' : !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
+        const result = expired ? 'expired' : !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
         await connection.execute(
-          'INSERT INTO player_submissions (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, outcome, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO player_submissions (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, result, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [session.session_id, session.challenge_date, new Date(now), input, normalized,
-            Math.max(0, now - session.started_at_utc.getTime()), outcome, answer?.answer_id ?? null],
+            Math.max(0, now - session.started_at_utc.getTime()), result, answer?.answer_id ?? null],
         );
-        accepted = outcome === 'correct';
+        accepted = result === 'correct';
         await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE session_id = ?', [session.session_id]);
         activityAt = new Date(now);
         if (accepted) {
@@ -105,7 +105,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
           feedback = { kind: 'success', text: count === MAX_ANSWERS ? 'Five for five. Beautifully done.' : `${answer!.display_answer} is in. Keep going!` };
         } else {
           feedback = { kind: 'error', text: expired ? 'Time is up. That answer arrived too late.'
-            : outcome === 'duplicate' ? 'Already on your list. Think of another!' : 'Not quite. Try another answer.' };
+            : result === 'duplicate' ? 'Already on your list. Think of another!' : 'Not quite. Try another answer.' };
         }
       }
 
@@ -117,7 +117,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const date = session?.challenge_date ?? today;
       const [[challenge]] = await connection.execute<RowDataPacket[]>('SELECT category, prompt FROM daily_challenges WHERE challenge_date = ?', [date]);
       const [answers] = session ? await connection.execute<RowDataPacket[]>(
-        "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.outcome = 'correct' ORDER BY s.submission_id", [session.session_id],
+        "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.result = 'correct' ORDER BY s.id", [session.session_id],
       ) : [[]];
       const finished = !!session?.finished_at_utc;
       const remaining = session ? remainingTime(session.started_at_utc.getTime(), session.finished_at_utc?.getTime() ?? now) : GAME_DURATION;

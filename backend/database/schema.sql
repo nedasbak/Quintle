@@ -102,30 +102,30 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     )
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS player_submissions (
-    submission_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_date DATE NOT NULL,
     submitted_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
     submitted_text VARCHAR(255) NOT NULL,
     normalized_text VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,
     response_time_ms INT UNSIGNED NOT NULL,
-    outcome ENUM('correct', 'duplicate', 'incorrect', 'expired') NOT NULL,
+    result ENUM('correct', 'duplicate', 'incorrect', 'expired') NOT NULL,
     answer_id BIGINT UNSIGNED DEFAULT NULL,
     credited_answer_id BIGINT UNSIGNED GENERATED ALWAYS AS (
-        CASE WHEN outcome = 'correct' THEN answer_id END
+        CASE WHEN result = 'correct' THEN answer_id END
     ) STORED,
     UNIQUE KEY uq_submission_credit (session_id, credited_answer_id),
-    KEY ix_submission_session_order (session_id, submission_id),
-    KEY ix_submission_rarity (challenge_date, outcome, answer_id),
+    KEY ix_submission_session_order (session_id, id),
+    KEY ix_submission_rarity (challenge_date, result, answer_id),
     KEY ix_submission_received (session_id, submitted_at),
-    KEY ix_submission_answer_result (answer_id, outcome),
+    KEY ix_submission_answer_result (answer_id, result),
     CONSTRAINT fk_submission_session FOREIGN KEY (session_id, challenge_date)
         REFERENCES game_sessions (session_id, challenge_date),
     CONSTRAINT fk_submission_answer FOREIGN KEY (challenge_date, answer_id)
         REFERENCES accepted_answers (challenge_date, id),
     CONSTRAINT ck_submission_answer CHECK (
-        (outcome IN ('incorrect', 'expired') AND answer_id IS NULL)
-        OR (outcome IN ('correct', 'duplicate') AND answer_id IS NOT NULL)
+        (result IN ('incorrect', 'expired') AND answer_id IS NULL)
+        OR (result IN ('correct', 'duplicate') AND answer_id IS NOT NULL)
     )
 ) ENGINE = InnoDB;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW current_challenge AS
@@ -172,7 +172,7 @@ WITH daily_totals AS (
     SELECT g.challenge_date, s.answer_id, COUNT(*) AS credited_rounds
     FROM player_scores AS g
     JOIN player_submissions AS s ON s.session_id = g.session_id
-    WHERE s.outcome = 'correct'
+    WHERE s.result = 'correct'
     GROUP BY g.challenge_date, s.answer_id
 )
 SELECT a.challenge_date, a.id AS answer_id, a.answer AS display_answer,

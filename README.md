@@ -87,8 +87,10 @@ as expired. They count as submissions but never earn points or fill answer slots
 Apply `backend/database/migrations/012_submission_input_fields.sql` next to rename `guess`
 to `submitted_text` and `submitted_at_utc` to `submitted_at`. Timestamps remain UTC;
 existing input, IDs, scores, and submission indexes are preserved.
+Then apply `backend/database/migrations/013_submission_identity_fields.sql` to rename
+`submission_id` to `id` and `outcome` to `result`, preserving credits and rarity statistics.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session field names/statuses, submission IDs/results, and challenge availability settings remain to be updated.
+Session field names/statuses and challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

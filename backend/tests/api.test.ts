@@ -18,6 +18,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
   const url = new URL(databaseUrl || 'mysql://unused@localhost/unused');
   const pool = createPool({ host: url.hostname, port: Number(url.port || 3306), user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password), database: url.pathname.slice(1), timezone: 'Z', dateStrings: ['DATE'], connectionLimit: 10 });
+  pool.on('connection', connection => connection.query("SET time_zone = '+00:00'"));
   let now = Date.parse('2026-11-17T12:00:00Z');
   let server: Server;
   let base: string;
@@ -50,6 +51,20 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     };
   }
   async function answer(client: ReturnType<typeof player>, value: string) { return client.request('/answers', { answer: value }); }
+  async function migrateSubmissionIdentity(connection: Pick<typeof pool, 'query'> = pool) {
+    const migration = await readFile(new URL('../database/migrations/013_submission_identity_fields.sql', import.meta.url), 'utf8');
+    for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+  }
+  async function restoreLegacySubmissionIdentity(connection: Pick<typeof pool, 'query'> = pool) {
+    await connection.query(`ALTER TABLE player_submissions
+      DROP CHECK ck_submission_answer, DROP INDEX uq_submission_credit, DROP COLUMN credited_answer_id`);
+    await connection.query(`ALTER TABLE player_submissions RENAME COLUMN id TO submission_id, RENAME COLUMN result TO outcome`);
+    await connection.query(`ALTER TABLE player_submissions
+      ADD COLUMN credited_answer_id BIGINT UNSIGNED GENERATED ALWAYS AS (CASE WHEN outcome = 'correct' THEN answer_id END) STORED,
+      ADD UNIQUE KEY uq_submission_credit (session_id, credited_answer_id),
+      ADD CONSTRAINT ck_submission_answer CHECK ((outcome IN ('incorrect', 'expired') AND answer_id IS NULL)
+        OR (outcome IN ('correct', 'duplicate') AND answer_id IS NOT NULL))`);
+  }
   async function removeSessionChallengeIds() {
     await pool.query('ALTER TABLE game_sessions DROP FOREIGN KEY fk_session_challenge_id');
     await pool.query(`ALTER TABLE game_sessions DROP INDEX uq_session_player_challenge,
@@ -92,16 +107,23 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(replies.filter(reply => reply.data.accepted).length, 1);
     assert.equal((await client.request()).data.game.score.total, 100);
   });
-  it('adds expired outcomes without changing existing submissions or credits', async () => {
-    const snapshot = async () => (await pool.query('SELECT * FROM player_submissions ORDER BY submission_id'))[0];
+  it('migrates submission IDs and results while preserving history, scores, and rarity', async () => {
+    const snapshot = async () => Promise.all([['player_submissions', 'id'], ['game_sessions', 'session_id'],
+      ['players', 'id'], ['answer_rarity_stats', 'answer_id']].map(async ([table, key]) => (await pool.query(`SELECT * FROM ${table} ORDER BY ${key}`))[0]));
     const before = await snapshot();
+    await restoreLegacySubmissionIdentity();
     await pool.query('ALTER TABLE player_submissions DROP CHECK ck_submission_answer');
     await pool.query(`ALTER TABLE player_submissions MODIFY COLUMN outcome ENUM('correct', 'duplicate', 'incorrect') NOT NULL,
       ADD CONSTRAINT ck_submission_answer CHECK ((outcome = 'incorrect' AND answer_id IS NULL)
         OR (outcome IN ('correct', 'duplicate') AND answer_id IS NOT NULL))`);
     const migration = await readFile(new URL('../database/migrations/011_expired_submissions.sql', import.meta.url), 'utf8');
     for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
+    await migrateSubmissionIdentity();
     assert.deepEqual(await snapshot(), before);
+    const [index] = await pool.query<RowDataPacket[]>("SHOW INDEX FROM player_submissions WHERE Key_name = 'ix_submission_answer_result'");
+    assert.deepEqual(index.map(column => column.Column_name), ['answer_id', 'result']);
+    const [[column]] = await pool.query<RowDataPacket[]>("SHOW COLUMNS FROM player_submissions WHERE Field = 'id'");
+    assert.equal(column.Extra, 'auto_increment');
   });
   it('expires at the server deadline and records late guesses without credit', async () => {
     const client = player();
@@ -126,12 +148,12 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.deepEqual([stored.total_submissions, stored.correct_count, stored.score, stored.total_games, stored.total_score], [7, 4, 400, 1, 400]);
     assert.equal(stored.last_played_at.getTime(), now);
     const [expired] = await pool.execute<RowDataPacket[]>(`SELECT submitted_text, normalized_text, response_time_ms, answer_id, credited_answer_id
-      FROM player_submissions WHERE session_id = ? AND outcome = 'expired' ORDER BY submission_id`, [stored.session_id]);
+      FROM player_submissions WHERE session_id = ? AND result = 'expired' ORDER BY id`, [stored.session_id]);
     assert.deepEqual(expired.map(row => Object.values(row)), [
       ['Monaco', 'monaco', 30000, null, null], ['Burma', 'burma', 31234, null, null], ['Moon', 'moon', 31234, null, null],
     ]);
     await assert.rejects(pool.execute(`UPDATE player_submissions SET answer_id =
-      (SELECT id FROM accepted_answers WHERE challenge_date = ? LIMIT 1) WHERE session_id = ? AND outcome = 'expired'`,
+      (SELECT id FROM accepted_answers WHERE challenge_date = ? LIMIT 1) WHERE session_id = ? AND result = 'expired'`,
     [stored.challenge_date, stored.session_id]), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
   });
   it('restores the original start and score after recreating the server service', async () => {
@@ -217,7 +239,9 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const migration = await readFile(new URL('../database/migrations/003_challenge_ids.sql', import.meta.url), 'utf8');
     for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
     const answerMigration = await readFile(new URL('../database/migrations/004_answer_fields.sql', import.meta.url), 'utf8');
+    await restoreLegacySubmissionIdentity();
     for (const statement of answerMigration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
+    await migrateSubmissionIdentity();
     const sessionMigration = await readFile(new URL('../database/migrations/009_session_challenges.sql', import.meta.url), 'utf8');
     for (const statement of sessionMigration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
     assert.deepEqual(await snapshot(), before);
@@ -297,7 +321,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const snapshot = async () => {
       const [games] = await pool.query<RowDataPacket[]>('SELECT * FROM game_sessions ORDER BY player_id, challenge_date');
       const [guesses] = await pool.query<RowDataPacket[]>(`SELECT s.*, g.player_id FROM player_submissions s
-        JOIN game_sessions g ON g.session_id = s.session_id ORDER BY s.submission_id`);
+        JOIN game_sessions g ON g.session_id = s.session_id ORDER BY s.id`);
       return [games.map(({ session_id, ...row }) => row), guesses.map(({ session_id, ...row }) => row)];
     };
     const before = await snapshot();
@@ -319,8 +343,8 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.deepEqual((await client.request()).data, original);
     const [sessions] = await pool.query<RowDataPacket[]>('SELECT session_id FROM game_sessions');
     for (const session of sessions) assert.match(session.session_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    await assert.rejects(pool.execute('UPDATE player_submissions SET session_id = ? WHERE submission_id = ?',
-      ['00000000-0000-4000-8000-000000000000', before[1][0].submission_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    await assert.rejects(pool.execute('UPDATE player_submissions SET session_id = ? WHERE id = ?',
+      ['00000000-0000-4000-8000-000000000000', before[1][0].id]), { code: 'ER_NO_REFERENCED_ROW_2' });
     assert.equal((await answer(client, 'Mexico')).data.accepted, false);
     assert.equal((await answer(client, 'Burma')).data.accepted, true);
   });
@@ -453,8 +477,8 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     await answer(client, 'Moon\u00a0 \t');
     assert.equal((await answer(client, '\uFDFA'.repeat(80))).status, 400);
     const [rows] = await pool.execute<RowDataPacket[]>(`SELECT s.* FROM player_submissions s JOIN game_sessions g ON g.session_id = s.session_id
-      JOIN players p ON p.id = g.player_id WHERE p.token_hash = ? ORDER BY s.submission_id`, [client.hash]);
-    assert.deepEqual(rows.map(row => [row.submitted_text, row.normalized_text, row.response_time_ms, row.outcome]), [
+      JOIN players p ON p.id = g.player_id WHERE p.token_hash = ? ORDER BY s.id`, [client.hash]);
+    assert.deepEqual(rows.map(row => [row.submitted_text, row.normalized_text, row.response_time_ms, row.result]), [
       ['  BÚRMA\t', 'burma', 1234, 'correct'], ['Myanmar', 'myanmar', 1734, 'duplicate'], ['Moon\u00a0 \t', 'moon', 1734, 'incorrect'],
     ]);
     now = started + 5049;
@@ -467,17 +491,19 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       const legacy = Array.from({ length: 501 }, (_, i) => [rows[0].session_id, rows[0].challenge_date,
         new Date(started + 2000), `  Legacy ${i}  `, `legacy ${i}`, 2000, 'incorrect']);
       await connection.query(`INSERT INTO player_submissions
-        (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, outcome) VALUES ?`, [legacy]);
+        (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, result) VALUES ?`, [legacy]);
       await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + ? WHERE session_id = ?', [legacy.length, rows[0].session_id]);
-      const snapshot = async () => Promise.all([['game_sessions', 'session_id'], ['player_submissions', 'submission_id'], ['players', 'id']]
+      const snapshot = async () => Promise.all([['game_sessions', 'session_id'], ['player_submissions', 'id'], ['players', 'id']]
         .map(async ([table, key]) => (await connection.query(`SELECT * FROM ${table} ORDER BY ${key}`))[0]));
       const before = await snapshot();
+      await restoreLegacySubmissionIdentity(connection);
       await connection.query(`ALTER TABLE player_submissions RENAME COLUMN submitted_text TO guess,
         RENAME COLUMN submitted_at TO submitted_at_utc`);
       await connection.query(`ALTER TABLE player_submissions DROP INDEX ix_submission_received, DROP INDEX ix_submission_answer_result,
         DROP COLUMN normalized_text, DROP COLUMN response_time_ms, MODIFY COLUMN guess VARCHAR(191) NOT NULL`);
       await migrateSubmissionDetails(connection);
       await connection.query(await readFile(new URL('../database/migrations/012_submission_input_fields.sql', import.meta.url), 'utf8'));
+      await migrateSubmissionIdentity(connection);
       assert.deepEqual(await snapshot(), before);
       const [indexes] = await connection.query<RowDataPacket[]>("SHOW INDEX FROM player_submissions WHERE Key_name = 'ix_submission_received'");
       assert.deepEqual(indexes.map(index => index.Column_name), ['session_id', 'submitted_at']);
