@@ -91,8 +91,10 @@ Then apply `backend/database/migrations/013_submission_identity_fields.sql` to r
 `submission_id` to `id` and `outcome` to `result`, preserving credits and rarity statistics.
 Apply `backend/database/migrations/014_session_identity_field.sql` next to rename the session
 primary key to `id`. Existing UUIDs, submission references, and score-view output stay the same.
+Then apply `backend/database/migrations/015_session_answer_count.sql` to rename `correct_count`
+to `correct_answers`, preserving stored counts, precise scoring, and session state checks.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session field names/statuses and challenge availability settings remain to be updated.
+Session timestamps/statuses and challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

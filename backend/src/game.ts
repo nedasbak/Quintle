@@ -11,7 +11,7 @@ interface Session extends RowDataPacket {
   expires_at: Date;
   finished_at_utc: Date | null;
   status: 'in_progress' | 'solved' | 'timed_out';
-  correct_count: number;
+  correct_answers: number;
   score: number | null;
 }
 
@@ -99,8 +99,8 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE id = ?', [session.id]);
         activityAt = new Date(now);
         if (accepted) {
-          const count = session.correct_count + 1;
-          await connection.execute('UPDATE game_sessions SET correct_count = ?, status = ?, finished_at_utc = ? WHERE id = ?',
+          const count = session.correct_answers + 1;
+          await connection.execute('UPDATE game_sessions SET correct_answers = ?, status = ?, finished_at_utc = ? WHERE id = ?',
             [count, count === MAX_ANSWERS ? 'solved' : 'in_progress', count === MAX_ANSWERS ? new Date(now) : null, session.id]);
           feedback = { kind: 'success', text: count === MAX_ANSWERS ? 'Five for five. Beautifully done.' : `${answer!.display_answer} is in. Keep going!` };
         } else {
@@ -121,11 +121,11 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       ) : [[]];
       const finished = !!session?.finished_at_utc;
       const remaining = session ? remainingTime(session.started_at_utc.getTime(), session.finished_at_utc?.getTime() ?? now) : GAME_DURATION;
-      const correctness = calculateScore(session?.correct_count ?? 0, 0);
-      const total = calculateScore(session?.correct_count ?? 0, finished ? remaining : 0);
+      const correctness = calculateScore(session?.correct_answers ?? 0, 0);
+      const total = calculateScore(session?.correct_answers ?? 0, finished ? remaining : 0);
       if (finished && Number(session!.score) !== total) throw new Error('Database scoring differs from game rules. Apply the precise-scoring migration.');
       const [results] = await connection.execute<RowDataPacket[]>(
-        'SELECT challenge_date AS date, correct_count AS correct, score FROM game_sessions WHERE player_id = ? AND finished_at_utc IS NOT NULL ORDER BY challenge_date', [player.player_id],
+        'SELECT challenge_date AS date, correct_answers AS correct, score FROM game_sessions WHERE player_id = ? AND finished_at_utc IS NOT NULL ORDER BY challenge_date', [player.player_id],
       );
       const completed = results.filter(result => result.date <= today);
       let streak = 0, longest = 0, lastDate: string | null = null;

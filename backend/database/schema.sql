@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     expires_at DATETIME(3) GENERATED ALWAYS AS (started_at_utc + INTERVAL 30 SECOND) STORED,
     finished_at_utc DATETIME(3) DEFAULT NULL,
     status ENUM('in_progress', 'solved', 'timed_out') NOT NULL DEFAULT 'in_progress',
-    correct_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    correct_answers TINYINT UNSIGNED NOT NULL DEFAULT 0,
     total_submissions INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     remaining_time_ms INT UNSIGNED GENERATED ALWAYS AS (
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
         END
     ) STORED,
     score SMALLINT UNSIGNED GENERATED ALWAYS AS (
-        FLOOR(100 * correct_count + 10 * remaining_seconds)
+        FLOOR(100 * correct_answers + 10 * remaining_seconds)
     ) STORED,
     UNIQUE KEY uq_session_player_day (player_id, challenge_date),
     UNIQUE KEY uq_session_player_challenge (player_id, challenge_id),
@@ -91,12 +91,12 @@ CREATE TABLE IF NOT EXISTS game_sessions (
         REFERENCES daily_challenges (id, challenge_date),
     CONSTRAINT ck_session_start_day CHECK (DATE(started_at_utc) = challenge_date),
     CONSTRAINT ck_session_state CHECK (
-        (status = 'in_progress' AND finished_at_utc IS NULL AND correct_count < 5)
-        OR (status = 'solved' AND correct_count = 5
+        (status = 'in_progress' AND finished_at_utc IS NULL AND correct_answers < 5)
+        OR (status = 'solved' AND correct_answers = 5
             AND finished_at_utc IS NOT NULL
             AND finished_at_utc >= started_at_utc
             AND finished_at_utc < started_at_utc + INTERVAL 30 SECOND)
-        OR (status = 'timed_out' AND correct_count < 5
+        OR (status = 'timed_out' AND correct_answers < 5
             AND finished_at_utc IS NOT NULL
             AND finished_at_utc = started_at_utc + INTERVAL 30 SECOND)
     )
@@ -133,7 +133,7 @@ SELECT challenge_date, category, prompt
 FROM daily_challenges
 WHERE challenge_date = UTC_DATE();
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW player_scores AS
-SELECT id AS session_id, player_id, challenge_date, status, correct_count,
+SELECT id AS session_id, player_id, challenge_date, status, correct_answers AS correct_count,
        remaining_seconds, score, finished_at_utc
 FROM game_sessions
 WHERE finished_at_utc IS NOT NULL;
