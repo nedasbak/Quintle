@@ -57,21 +57,21 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_id BIGINT UNSIGNED NOT NULL,
     challenge_date DATE NOT NULL,
-    started_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
-    expires_at DATETIME(3) GENERATED ALWAYS AS (started_at_utc + INTERVAL 30 SECOND) STORED,
-    finished_at_utc DATETIME(3) DEFAULT NULL,
+    started_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+    expires_at DATETIME(3) GENERATED ALWAYS AS (started_at + INTERVAL 30 SECOND) STORED,
+    finished_at DATETIME(3) DEFAULT NULL,
     status ENUM('in_progress', 'solved', 'timed_out') NOT NULL DEFAULT 'in_progress',
     correct_answers TINYINT UNSIGNED NOT NULL DEFAULT 0,
     total_submissions INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     remaining_time_ms INT UNSIGNED GENERATED ALWAYS AS (
-        CASE WHEN status = 'solved' THEN 30000 - TIMESTAMPDIFF(MICROSECOND, started_at_utc, finished_at_utc) DIV 1000 ELSE 0 END
+        CASE WHEN status = 'solved' THEN 30000 - TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) DIV 1000 ELSE 0 END
     ) STORED,
     -- Milisekundžių tikslumas išsaugomas iki galutinio taškų apvalinimo.
     remaining_seconds DECIMAL(5,3) UNSIGNED GENERATED ALWAYS AS (
         CASE status
             WHEN 'solved' THEN 30 - (
-                TIMESTAMPDIFF(MICROSECOND, started_at_utc, finished_at_utc) / 1000000
+                TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) / 1000000
             )
             WHEN 'timed_out' THEN 0
         END
@@ -89,16 +89,16 @@ CREATE TABLE IF NOT EXISTS game_sessions (
         REFERENCES daily_challenges (challenge_date),
     CONSTRAINT fk_session_challenge_id FOREIGN KEY (challenge_id, challenge_date)
         REFERENCES daily_challenges (id, challenge_date),
-    CONSTRAINT ck_session_start_day CHECK (DATE(started_at_utc) = challenge_date),
+    CONSTRAINT ck_session_start_day CHECK (DATE(started_at) = challenge_date),
     CONSTRAINT ck_session_state CHECK (
-        (status = 'in_progress' AND finished_at_utc IS NULL AND correct_answers < 5)
+        (status = 'in_progress' AND finished_at IS NULL AND correct_answers < 5)
         OR (status = 'solved' AND correct_answers = 5
-            AND finished_at_utc IS NOT NULL
-            AND finished_at_utc >= started_at_utc
-            AND finished_at_utc < started_at_utc + INTERVAL 30 SECOND)
+            AND finished_at IS NOT NULL
+            AND finished_at >= started_at
+            AND finished_at < started_at + INTERVAL 30 SECOND)
         OR (status = 'timed_out' AND correct_answers < 5
-            AND finished_at_utc IS NOT NULL
-            AND finished_at_utc = started_at_utc + INTERVAL 30 SECOND)
+            AND finished_at IS NOT NULL
+            AND finished_at = started_at + INTERVAL 30 SECOND)
     )
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS player_submissions (
@@ -134,9 +134,9 @@ FROM daily_challenges
 WHERE challenge_date = UTC_DATE();
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW player_scores AS
 SELECT id AS session_id, player_id, challenge_date, status, correct_answers AS correct_count,
-       remaining_seconds, score, finished_at_utc
+       remaining_seconds, score, finished_at AS finished_at_utc
 FROM game_sessions
-WHERE finished_at_utc IS NOT NULL;
+WHERE finished_at IS NOT NULL;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW daily_leaderboard AS
 SELECT challenge_date, player_id, correct_count, remaining_seconds, score,
        DENSE_RANK() OVER (PARTITION BY challenge_date ORDER BY score DESC) AS daily_rank

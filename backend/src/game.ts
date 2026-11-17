@@ -7,9 +7,9 @@ interface Session extends RowDataPacket {
   id: string;
   challenge_id: number;
   challenge_date: string;
-  started_at_utc: Date;
+  started_at: Date;
   expires_at: Date;
-  finished_at_utc: Date | null;
+  finished_at: Date | null;
   status: 'in_progress' | 'solved' | 'timed_out';
   correct_answers: number;
   score: number | null;
@@ -52,7 +52,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const today = getDailyChallenge(now).date;
       await ensureChallenge(connection, now);
       const [[active]] = await connection.execute<Session[]>(
-        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY started_at_utc DESC, id DESC LIMIT 1 FOR UPDATE",
+        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY started_at DESC, id DESC LIMIT 1 FOR UPDATE",
         [player.player_id],
       );
       const [[daily]] = active ? [[]] : await connection.execute<Session[]>(
@@ -65,7 +65,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
 
       // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
       if (session?.status === 'in_progress' && now >= session.expires_at.getTime()) {
-        await connection.execute("UPDATE game_sessions SET status = 'timed_out', finished_at_utc = ? WHERE id = ?",
+        await connection.execute("UPDATE game_sessions SET status = 'timed_out', finished_at = ? WHERE id = ?",
           [session.expires_at, session.id]);
         session.status = 'timed_out';
         feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
@@ -73,7 +73,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       if (action === 'start' && !session) {
         const sessionId = randomUUID();
         await connection.execute(
-          'INSERT INTO game_sessions (id, player_id, challenge_id, challenge_date, started_at_utc, created_at) SELECT ?, ?, id, challenge_date, ?, ? FROM daily_challenges WHERE challenge_date = ?',
+          'INSERT INTO game_sessions (id, player_id, challenge_id, challenge_date, started_at, created_at) SELECT ?, ?, id, challenge_date, ?, ? FROM daily_challenges WHERE challenge_date = ?',
           [sessionId, player.player_id, new Date(now), new Date(now), today],
         );
         const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE id = ?', [sessionId]);
@@ -93,14 +93,14 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         await connection.execute(
           'INSERT INTO player_submissions (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, result, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [session.id, session.challenge_date, new Date(now), input, normalized,
-            Math.max(0, now - session.started_at_utc.getTime()), result, answer?.answer_id ?? null],
+            Math.max(0, now - session.started_at.getTime()), result, answer?.answer_id ?? null],
         );
         accepted = result === 'correct';
         await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE id = ?', [session.id]);
         activityAt = new Date(now);
         if (accepted) {
           const count = session.correct_answers + 1;
-          await connection.execute('UPDATE game_sessions SET correct_answers = ?, status = ?, finished_at_utc = ? WHERE id = ?',
+          await connection.execute('UPDATE game_sessions SET correct_answers = ?, status = ?, finished_at = ? WHERE id = ?',
             [count, count === MAX_ANSWERS ? 'solved' : 'in_progress', count === MAX_ANSWERS ? new Date(now) : null, session.id]);
           feedback = { kind: 'success', text: count === MAX_ANSWERS ? 'Five for five. Beautifully done.' : `${answer!.display_answer} is in. Keep going!` };
         } else {
@@ -119,13 +119,13 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const [answers] = session ? await connection.execute<RowDataPacket[]>(
         "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.result = 'correct' ORDER BY s.id", [session.id],
       ) : [[]];
-      const finished = !!session?.finished_at_utc;
-      const remaining = session ? remainingTime(session.started_at_utc.getTime(), session.finished_at_utc?.getTime() ?? now) : GAME_DURATION;
+      const finished = !!session?.finished_at;
+      const remaining = session ? remainingTime(session.started_at.getTime(), session.finished_at?.getTime() ?? now) : GAME_DURATION;
       const correctness = calculateScore(session?.correct_answers ?? 0, 0);
       const total = calculateScore(session?.correct_answers ?? 0, finished ? remaining : 0);
       if (finished && Number(session!.score) !== total) throw new Error('Database scoring differs from game rules. Apply the precise-scoring migration.');
       const [results] = await connection.execute<RowDataPacket[]>(
-        'SELECT challenge_date AS date, correct_answers AS correct, score FROM game_sessions WHERE player_id = ? AND finished_at_utc IS NOT NULL ORDER BY challenge_date', [player.player_id],
+        'SELECT challenge_date AS date, correct_answers AS correct, score FROM game_sessions WHERE player_id = ? AND finished_at IS NOT NULL ORDER BY challenge_date', [player.player_id],
       );
       const completed = results.filter(result => result.date <= today);
       let streak = 0, longest = 0, lastDate: string | null = null;
@@ -143,8 +143,8 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
           challenge: { date, number: getDailyChallenge(Date.parse(date)).number, category: challenge.category, prompt: challenge.prompt },
           status: !session ? 'ready' : finished ? 'finished' : 'playing',
           answers: answers.map(answer => answer.display_answer as string),
-          startedAt: session?.started_at_utc.getTime() ?? null,
-          finishedAt: session?.finished_at_utc?.getTime() ?? null,
+          startedAt: session?.started_at.getTime() ?? null,
+          finishedAt: session?.finished_at?.getTime() ?? null,
           score: { correctness, speed: total - correctness, total },
         },
         serverNow: now, accepted, feedback,

@@ -93,8 +93,10 @@ Apply `backend/database/migrations/014_session_identity_field.sql` next to renam
 primary key to `id`. Existing UUIDs, submission references, and score-view output stay the same.
 Then apply `backend/database/migrations/015_session_answer_count.sql` to rename `correct_count`
 to `correct_answers`, preserving stored counts, precise scoring, and session state checks.
+Apply `backend/database/migrations/016_session_timestamps.sql` next to rename the session
+timestamps to `started_at` and `finished_at`. Values remain UTC with millisecond precision.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session timestamps/statuses and challenge availability settings remain to be updated.
+Session statuses and challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

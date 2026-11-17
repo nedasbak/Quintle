@@ -51,11 +51,20 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     };
   }
   async function answer(client: ReturnType<typeof player>, value: string) { return client.request('/answers', { answer: value }); }
+  async function renameSessionTimestamps(legacy = false, connection: Pick<typeof pool, 'query'> = pool) {
+    const migration = await readFile(new URL('../database/migrations/016_session_timestamps.sql', import.meta.url), 'utf8');
+    const sql = legacy ? migration.replace(/\b(started_at|finished_at)\b/g, '$1_utc')
+      .replace('RENAME COLUMN started_at_utc TO started_at_utc', 'RENAME COLUMN started_at TO started_at_utc')
+      .replace('RENAME COLUMN finished_at_utc TO finished_at_utc', 'RENAME COLUMN finished_at TO finished_at_utc') : migration;
+    for (const statement of sql.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+  }
   async function renameSessionAnswerCount(legacy = false, connection: Pick<typeof pool, 'query'> = pool) {
+    if (legacy) await renameSessionTimestamps(true, connection);
     const migration = await readFile(new URL('../database/migrations/015_session_answer_count.sql', import.meta.url), 'utf8');
     const sql = legacy ? migration.replaceAll('correct_answers', 'correct_count')
       .replace('RENAME COLUMN correct_count TO correct_count', 'RENAME COLUMN correct_answers TO correct_count') : migration;
     for (const statement of sql.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+    if (!legacy) await renameSessionTimestamps(false, connection);
   }
   async function renameSessionIdentity(legacy = false, connection: Pick<typeof pool, 'query'> = pool) {
     if (legacy) await renameSessionAnswerCount(true, connection);
@@ -230,7 +239,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const [after] = await pool.query<RowDataPacket[]>('SELECT id, score FROM game_sessions ORDER BY id');
     assert.deepEqual(after, before);
   });
-  it('renames answer counts while preserving sessions, submissions, and score views', async () => {
+  it('renames session counts and timestamps while preserving history and score views', async () => {
     const snapshot = async () => Promise.all([['game_sessions', 'id'], ['player_submissions', 'id'], ['player_scores', 'session_id'],
       ['daily_leaderboard', 'challenge_date, player_id'], ['player_streaks', 'player_id'], ['answer_rarity_stats', 'answer_id']]
       .map(async ([table, order]) => (await pool.query(`SELECT * FROM ${table} ORDER BY ${order}`))[0]));
@@ -241,6 +250,11 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     for (const [status, count] of [['in_progress', 5], ['solved', 4], ['timed_out', 5]]) {
       await assert.rejects(pool.execute('UPDATE game_sessions SET correct_answers = ? WHERE status = ?', [count, status]),
         { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+    }
+    for (const update of ["started_at = started_at - INTERVAL 1 DAY WHERE status = 'in_progress'",
+      "finished_at = started_at + INTERVAL 30 SECOND WHERE status = 'solved'",
+      "finished_at = started_at + INTERVAL 29 SECOND WHERE status = 'timed_out'"]) {
+      await assert.rejects(pool.query(`UPDATE game_sessions SET ${update}`), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
     }
     const [indexes] = await pool.query<RowDataPacket[]>("SHOW INDEX FROM game_sessions WHERE Key_name IN ('ix_session_daily_score', 'ix_session_challenge_score')");
     for (const [name, key] of [['ix_session_daily_score', 'challenge_date'], ['ix_session_challenge_score', 'challenge_id']]) {
@@ -319,7 +333,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     await answer(client, 'Mexico');
     const original = (await client.request()).data;
     const snapshot = async () => (await pool.query<RowDataPacket[]>(`SELECT HEX(p.token_hash) AS token, p.created_at,
-      g.id, g.challenge_date, g.started_at_utc, g.finished_at_utc, g.status, g.correct_answers, g.remaining_seconds, g.score,
+      g.id, g.challenge_date, g.started_at, g.finished_at, g.status, g.correct_answers, g.remaining_seconds, g.score,
       s.current_streak, s.longest_streak, s.last_played_date
       FROM players p LEFT JOIN game_sessions g ON g.player_id = p.id
       LEFT JOIN player_streaks s ON s.player_id = p.id ORDER BY token, g.id`))[0];
@@ -343,8 +357,8 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     for (const player of players) assert.match(player.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     const [[streaks]] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM player_streaks');
     assert.equal(streaks.count, players.length);
-    await assert.rejects(pool.query(`INSERT INTO game_sessions (id, player_id, challenge_id, challenge_date, started_at_utc)
-      SELECT '00000000-0000-4000-8000-000000000000', player_id, challenge_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
+    await assert.rejects(pool.query(`INSERT INTO game_sessions (id, player_id, challenge_id, challenge_date, started_at)
+      SELECT '00000000-0000-4000-8000-000000000000', player_id, challenge_id, challenge_date, started_at FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
     await assert.rejects(pool.execute('UPDATE game_sessions SET player_id = ? WHERE id = ?',
       ['00000000-0000-4000-8000-000000000000', before.find(row => row.id)!.id]), { code: 'ER_NO_REFERENCED_ROW_2' });
   });
@@ -477,11 +491,11 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       assert.deepEqual(after, before);
       assert.deepEqual((await connection.query('SELECT * FROM player_submissions ORDER BY id'))[0], submissions);
       assert.deepEqual((await connection.query('SELECT * FROM player_scores ORDER BY session_id'))[0], scores);
-      const [expired] = await connection.query<RowDataPacket[]>("SELECT remaining_time_ms, expires_at, finished_at_utc FROM game_sessions WHERE status = 'timed_out'");
+      const [expired] = await connection.query<RowDataPacket[]>("SELECT remaining_time_ms, expires_at, finished_at FROM game_sessions WHERE status = 'timed_out'");
       assert.ok(expired.length > 0);
       for (const session of expired) {
         assert.equal(session.remaining_time_ms, 0);
-        assert.deepEqual(session.expires_at, session.finished_at_utc);
+        assert.deepEqual(session.expires_at, session.finished_at);
       }
     } finally { connection.release(); }
     assert.deepEqual((await client.request()).data, original);
