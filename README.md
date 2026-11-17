@@ -20,4 +20,17 @@ Five answers. Thirty seconds. One daily challenge.
 - `backend/`: API and game logic
 - `docs/mvp.md`: game requirements
 
-Folder setup only. App code and dependencies will be added later.
+## Run
+
+```powershell
+npm.cmd install
+npm.cmd run dev
+```
+
+Use `npm` instead of `npm.cmd` outside Windows PowerShell.
+
+`npm run build` builds the frontend. `npm test` runs the tests.
+
+The game UI runs locally with sample challenges and browser-saved progress. Express and server validation will be added later.
+
+Rarity bonuses use sample pick rates for the frontend preview, not real player data.
