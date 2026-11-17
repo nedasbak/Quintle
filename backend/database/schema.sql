@@ -40,14 +40,14 @@ CREATE TABLE IF NOT EXISTS answer_keys (
         REFERENCES accepted_answers (challenge_date, id)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS players (
-    player_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     token_hash BINARY(32) NOT NULL,
     created_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
     UNIQUE KEY uq_player_token (token_hash)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS game_sessions (
     session_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    player_id BIGINT UNSIGNED NOT NULL,
+    player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_date DATE NOT NULL,
     started_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
     finished_at_utc DATETIME(3) DEFAULT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     UNIQUE KEY uq_session_player_day (player_id, challenge_date),
     UNIQUE KEY uq_session_id_day (session_id, challenge_date),
     KEY ix_session_daily_score (challenge_date, score DESC),
-    CONSTRAINT fk_session_player FOREIGN KEY (player_id) REFERENCES players (player_id),
+    CONSTRAINT fk_session_player FOREIGN KEY (player_id) REFERENCES players (id),
     CONSTRAINT fk_session_challenge FOREIGN KEY (challenge_date)
         REFERENCES daily_challenges (challenge_date),
     CONSTRAINT ck_session_start_day CHECK (DATE(started_at_utc) = challenge_date),
@@ -133,14 +133,14 @@ WITH consecutive_days AS (
     FROM consecutive_days
     GROUP BY player_id, day_group
 )
-SELECT p.player_id,
+SELECT p.id AS player_id,
        COALESCE(MAX(CASE WHEN s.last_played_date >= UTC_DATE() - INTERVAL 1 DAY
                          THEN s.days_played END), 0) AS current_streak,
        COALESCE(MAX(s.days_played), 0) AS longest_streak,
        MAX(s.last_played_date) AS last_played_date
 FROM players AS p
-LEFT JOIN streaks AS s ON s.player_id = p.player_id
-GROUP BY p.player_id;
+LEFT JOIN streaks AS s ON s.player_id = p.id
+GROUP BY p.id;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW answer_rarity_stats AS
 WITH daily_totals AS (
     SELECT challenge_date, COUNT(*) AS finished_rounds

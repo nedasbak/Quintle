@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getDailyChallenge, normalizeAnswer } from '../../shared/challenges.mjs';
 import { calculateScore, GAME_DURATION, MAX_ANSWERS, remainingTime } from '../../shared/gameRules.mjs';
@@ -40,9 +41,9 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
-      await connection.execute('INSERT IGNORE INTO players (token_hash) VALUES (?)', [tokenHash]);
+      await connection.execute('INSERT IGNORE INTO players (id, token_hash) VALUES (?, ?)', [randomUUID(), tokenHash]);
       const [[player]] = await connection.execute<RowDataPacket[]>(
-        'SELECT player_id FROM players WHERE token_hash = ? FOR UPDATE', [tokenHash],
+        'SELECT id AS player_id FROM players WHERE token_hash = ? FOR UPDATE', [tokenHash],
       );
       const now = clock();
       const today = getDailyChallenge(now).date;

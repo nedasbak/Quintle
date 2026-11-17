@@ -60,7 +60,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(result!.data.game.status, 'finished');
     assert.deepEqual(result!.data.game.score, { correctness: 500, speed: 249, total: 749 });
     const [[stored]] = await pool.execute<RowDataPacket[]>(
-      'SELECT g.score, g.remaining_seconds FROM game_sessions g JOIN players p ON p.player_id = g.player_id WHERE p.token_hash = ?', [client.hash]);
+      'SELECT g.score, g.remaining_seconds FROM game_sessions g JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?', [client.hash]);
     assert.equal(stored.score, 749);
     assert.equal(Number(stored.remaining_seconds), 24.951);
   });
@@ -206,6 +206,41 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const client = player();
     await client.request('/start', {});
     assert.equal((await answer(client, 'Burma')).data.accepted, true);
+  });
+  it('migrates player UUIDs while retaining cookies, sessions, scores, and streaks', async () => {
+    const client = player();
+    await client.request('/start', {});
+    await answer(client, 'Mexico');
+    const original = (await client.request()).data;
+    const snapshot = async () => (await pool.query<RowDataPacket[]>(`SELECT HEX(p.token_hash) AS token, p.created_at_utc,
+      g.session_id, g.challenge_date, g.started_at_utc, g.finished_at_utc, g.status, g.correct_count, g.remaining_seconds, g.score,
+      s.current_streak, s.longest_streak, s.last_played_date
+      FROM players p LEFT JOIN game_sessions g ON g.player_id = p.id
+      LEFT JOIN player_streaks s ON s.player_id = p.id ORDER BY token, g.session_id`))[0];
+    const before = await snapshot();
+    await pool.query('ALTER TABLE players ADD COLUMN player_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, ADD UNIQUE KEY uq_legacy_player (player_id)');
+    await pool.query('ALTER TABLE game_sessions ADD COLUMN legacy_player_id BIGINT UNSIGNED NULL');
+    await pool.query('UPDATE game_sessions g JOIN players p ON p.id = g.player_id SET g.legacy_player_id = p.player_id');
+    await pool.query('ALTER TABLE game_sessions DROP FOREIGN KEY fk_session_player');
+    await pool.query(`ALTER TABLE game_sessions DROP INDEX uq_session_player_day, DROP COLUMN player_id,
+      CHANGE COLUMN legacy_player_id player_id BIGINT UNSIGNED NOT NULL,
+      ADD UNIQUE KEY uq_session_player_day (player_id, challenge_date)`);
+    await pool.query('ALTER TABLE players DROP PRIMARY KEY, DROP COLUMN id, ADD PRIMARY KEY (player_id), DROP INDEX uq_legacy_player');
+    await pool.query('ALTER TABLE game_sessions ADD CONSTRAINT fk_session_player FOREIGN KEY (player_id) REFERENCES players (player_id)');
+    const migration = await readFile(new URL('../database/migrations/005_player_uuids.sql', import.meta.url), 'utf8');
+    for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
+    assert.deepEqual(await snapshot(), before);
+    assert.deepEqual((await client.request()).data, original);
+    const [players] = await pool.query<RowDataPacket[]>('SELECT id FROM players');
+    for (const player of players) assert.match(player.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const [[streaks]] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM player_streaks');
+    assert.equal(streaks.count, players.length);
+    await assert.rejects(pool.query(`INSERT INTO game_sessions (player_id, challenge_date, started_at_utc)
+      SELECT player_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
+    await assert.rejects(pool.execute('UPDATE game_sessions SET player_id = ? WHERE session_id = ?',
+      ['00000000-0000-4000-8000-000000000000', before.find(row => row.session_id)!.session_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    await assert.rejects(pool.query(`INSERT INTO game_sessions (player_id, challenge_date, started_at_utc)
+      SELECT player_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
   });
   it('adds challenge metadata to an existing database without losing content', async () => {
     const [before] = await pool.query<RowDataPacket[]>('SELECT challenge_date, category, prompt FROM daily_challenges ORDER BY challenge_date');
