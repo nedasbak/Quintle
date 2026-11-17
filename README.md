@@ -72,8 +72,10 @@ with random UUIDs and preserve existing cookies, games, and scores.
 Then apply `backend/database/migrations/006_player_statistics.sql` to add profile fields and
 backfill totals and streaks. The API refreshes statistics from completed attempts on every request;
 timeouts count as completed games. Stored current streaks update when the player returns.
+Apply `backend/database/migrations/007_session_uuids.sql` next to convert session IDs and
+their submission references to random UUIDs while preserving answers, scores, and deadlines.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session UUIDs/fields and submission details remain to be updated.
+Session field names/settings and submission details remain to be updated.
 
 ## Scoring and tests
 

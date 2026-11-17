@@ -143,7 +143,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const oldDefinition = migration.replace('DECIMAL(5,3)', 'TINYINT').replace(' / 1000000', ' DIV 1000000')
       .replace('FLOOR(100 * correct_count + 10 * remaining_seconds)', '100 * correct_count + 10 * remaining_seconds');
     await pool.query(oldDefinition);
-    const [[rounded]] = await pool.query<RowDataPacket[]>('SELECT score FROM game_sessions WHERE session_id = ?', [before[0].session_id]);
+    const [[rounded]] = await pool.query<RowDataPacket[]>('SELECT score FROM game_sessions WHERE session_id = ?', [before.find(row => row.score === 749)!.session_id]);
     assert.equal(rounded.score, 750);
     await pool.query(migration);
     const [after] = await pool.query<RowDataPacket[]>('SELECT session_id, score FROM game_sessions ORDER BY session_id');
@@ -236,12 +236,46 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     for (const player of players) assert.match(player.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     const [[streaks]] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM player_streaks');
     assert.equal(streaks.count, players.length);
-    await assert.rejects(pool.query(`INSERT INTO game_sessions (player_id, challenge_date, started_at_utc)
-      SELECT player_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
+    await assert.rejects(pool.query(`INSERT INTO game_sessions (session_id, player_id, challenge_date, started_at_utc)
+      SELECT '00000000-0000-4000-8000-000000000000', player_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
     await assert.rejects(pool.execute('UPDATE game_sessions SET player_id = ? WHERE session_id = ?',
       ['00000000-0000-4000-8000-000000000000', before.find(row => row.session_id)!.session_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
-    await assert.rejects(pool.query(`INSERT INTO game_sessions (player_id, challenge_date, started_at_utc)
-      SELECT player_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
+  });
+  it('migrates session UUIDs without losing guesses, scores, or the original deadline', async () => {
+    const client = player();
+    await client.request('/start', {});
+    now += 1234;
+    await answer(client, 'Mexico');
+    const original = (await client.request()).data;
+    const snapshot = async () => {
+      const [games] = await pool.query<RowDataPacket[]>('SELECT * FROM game_sessions ORDER BY player_id, challenge_date');
+      const [guesses] = await pool.query<RowDataPacket[]>(`SELECT s.*, g.player_id FROM player_submissions s
+        JOIN game_sessions g ON g.session_id = s.session_id ORDER BY s.submission_id`);
+      return [games.map(({ session_id, ...row }) => row), guesses.map(({ session_id, ...row }) => row)];
+    };
+    const before = await snapshot();
+    const connection = await pool.getConnection();
+    try {
+      await connection.query('ALTER TABLE game_sessions ADD COLUMN legacy_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, ADD UNIQUE KEY uq_legacy_session (legacy_id)');
+      await connection.query('ALTER TABLE player_submissions DROP FOREIGN KEY fk_submission_session');
+      await connection.query('UPDATE player_submissions s JOIN game_sessions g ON g.session_id = s.session_id SET s.session_id = g.legacy_id');
+      await connection.query('ALTER TABLE player_submissions MODIFY COLUMN session_id BIGINT UNSIGNED NOT NULL');
+      await connection.query(`ALTER TABLE game_sessions DROP INDEX uq_session_id_day, DROP PRIMARY KEY, DROP COLUMN session_id,
+        CHANGE COLUMN legacy_id session_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, ADD PRIMARY KEY (session_id),
+        DROP INDEX uq_legacy_session, ADD UNIQUE KEY uq_session_id_day (session_id, challenge_date)`);
+      await connection.query(`ALTER TABLE player_submissions ADD CONSTRAINT fk_submission_session
+        FOREIGN KEY (session_id, challenge_date) REFERENCES game_sessions (session_id, challenge_date)`);
+      const migration = await readFile(new URL('../database/migrations/007_session_uuids.sql', import.meta.url), 'utf8');
+      for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+    } finally { connection.release(); }
+    assert.deepEqual(await snapshot(), before);
+    assert.deepEqual((await client.request()).data, original);
+    const [sessions] = await pool.query<RowDataPacket[]>('SELECT session_id FROM game_sessions');
+    for (const session of sessions) assert.match(session.session_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    await assert.rejects(pool.execute('UPDATE player_submissions SET session_id = ? WHERE submission_id = ?',
+      ['00000000-0000-4000-8000-000000000000', before[1][0].submission_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    assert.equal((await answer(client, 'Mexico')).data.accepted, false);
+    assert.equal((await answer(client, 'Burma')).data.accepted, true);
   });
   it('tracks player statistics across gaps and restores them from existing history', async () => {
     const client = player();

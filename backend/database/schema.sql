@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS players (
     UNIQUE KEY uq_player_token (token_hash)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS game_sessions (
-    session_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_date DATE NOT NULL,
     started_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS player_submissions (
     submission_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    session_id BIGINT UNSIGNED NOT NULL,
+    session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_date DATE NOT NULL,
     submitted_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
     guess VARCHAR(191) NOT NULL,

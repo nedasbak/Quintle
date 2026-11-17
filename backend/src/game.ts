@@ -4,7 +4,7 @@ import { getDailyChallenge, normalizeAnswer } from '../../shared/challenges.mjs'
 import { calculateScore, GAME_DURATION, MAX_ANSWERS, remainingTime } from '../../shared/gameRules.mjs';
 
 interface Session extends RowDataPacket {
-  session_id: number;
+  session_id: string;
   challenge_date: string;
   started_at_utc: Date;
   finished_at_utc: Date | null;
@@ -50,7 +50,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const today = getDailyChallenge(now).date;
       await ensureChallenge(connection, now);
       const [[active]] = await connection.execute<Session[]>(
-        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY session_id DESC LIMIT 1 FOR UPDATE",
+        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY started_at_utc DESC, session_id DESC LIMIT 1 FOR UPDATE",
         [player.player_id],
       );
       const [[daily]] = active ? [[]] : await connection.execute<Session[]>(
@@ -69,11 +69,12 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
       }
       if (action === 'start' && !session) {
-        const [created] = await connection.execute<ResultSetHeader>(
-          'INSERT INTO game_sessions (player_id, challenge_date, started_at_utc) VALUES (?, ?, ?)',
-          [player.player_id, today, new Date(now)],
+        const sessionId = randomUUID();
+        await connection.execute(
+          'INSERT INTO game_sessions (session_id, player_id, challenge_date, started_at_utc) VALUES (?, ?, ?, ?)',
+          [sessionId, player.player_id, today, new Date(now)],
         );
-        const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [created.insertId]);
+        const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [sessionId]);
         session = started;
         activityAt = new Date(now);
       } else if (action === 'answer' && session?.status === 'in_progress') {
