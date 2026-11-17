@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS player_submissions (
     guess VARCHAR(255) NOT NULL,
     normalized_text VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,
     response_time_ms INT UNSIGNED NOT NULL,
-    outcome ENUM('correct', 'duplicate', 'incorrect') NOT NULL,
+    outcome ENUM('correct', 'duplicate', 'incorrect', 'expired') NOT NULL,
     answer_id BIGINT UNSIGNED DEFAULT NULL,
     credited_answer_id BIGINT UNSIGNED GENERATED ALWAYS AS (
         CASE WHEN outcome = 'correct' THEN answer_id END
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS player_submissions (
     CONSTRAINT fk_submission_answer FOREIGN KEY (challenge_date, answer_id)
         REFERENCES accepted_answers (challenge_date, id),
     CONSTRAINT ck_submission_answer CHECK (
-        (outcome = 'incorrect' AND answer_id IS NULL)
+        (outcome IN ('incorrect', 'expired') AND answer_id IS NULL)
         OR (outcome IN ('correct', 'duplicate') AND answer_id IS NOT NULL)
     )
 ) ENGINE = InnoDB;

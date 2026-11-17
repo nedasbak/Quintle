@@ -76,14 +76,16 @@ Apply `backend/database/migrations/007_session_uuids.sql` next to convert sessio
 their submission references to random UUIDs while preserving answers, scores, and deadlines.
 Then apply `backend/database/migrations/008_session_details.sql` for deadlines, millisecond
 time remaining, creation timestamps, and submission counts. Counts include correct, incorrect,
-and duplicate guesses. Deadlines and completion time remain derived from server timestamps.
+duplicate, and expired guesses. Deadlines and completion time remain derived from server timestamps.
 Apply `backend/database/migrations/009_session_challenges.sql` next to link existing sessions
 to challenge IDs, enforce one attempt per player and challenge, and index scores by challenge.
 With `DATABASE_URL` set, run `node backend/database/migrations/010_submission_details.ts`
 after 009, with the API stopped and a backup. It backfills Unicode-normalized guesses,
 millisecond response times, and submission indexes while preserving original input.
+Then apply `backend/database/migrations/011_expired_submissions.sql` to record late guesses
+as expired. They count as submissions but never earn points or fill answer slots.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session/submission field names, expired guesses, and challenge availability settings remain to be updated.
+Session/submission field names and challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

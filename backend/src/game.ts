@@ -79,16 +79,17 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [sessionId]);
         session = started;
         activityAt = new Date(now);
-      } else if (action === 'answer' && session?.status === 'in_progress') {
+      } else if (action === 'answer' && session && session.status !== 'solved') {
+        const expired = session.status === 'timed_out';
         const normalized = normalizeAnswer(input!);
-        const [[answer]] = await connection.execute<RowDataPacket[]>(
+        const [[answer]] = expired ? [[]] : await connection.execute<RowDataPacket[]>(
           'SELECT a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_key = ?',
           [session.challenge_date, normalized],
         );
         const [[duplicate]] = answer ? await connection.execute<RowDataPacket[]>(
           "SELECT submission_id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND outcome = 'correct'", [session.session_id, answer.answer_id],
         ) : [[]];
-        const outcome = !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
+        const outcome = expired ? 'expired' : !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
         await connection.execute(
           'INSERT INTO player_submissions (session_id, challenge_date, submitted_at_utc, guess, normalized_text, response_time_ms, outcome, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [session.session_id, session.challenge_date, new Date(now), input, normalized,
@@ -103,7 +104,8 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
             [count, count === MAX_ANSWERS ? 'solved' : 'in_progress', count === MAX_ANSWERS ? new Date(now) : null, session.session_id]);
           feedback = { kind: 'success', text: count === MAX_ANSWERS ? 'Five for five. Beautifully done.' : `${answer!.display_answer} is in. Keep going!` };
         } else {
-          feedback = { kind: 'error', text: outcome === 'duplicate' ? 'Already on your list. Think of another!' : 'Not quite. Try another answer.' };
+          feedback = { kind: 'error', text: expired ? 'Time is up. That answer arrived too late.'
+            : outcome === 'duplicate' ? 'Already on your list. Think of another!' : 'Not quite. Try another answer.' };
         }
       }
 

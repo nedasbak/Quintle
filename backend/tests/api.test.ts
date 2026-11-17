@@ -70,6 +70,10 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       'SELECT g.score, g.remaining_seconds FROM game_sessions g JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?', [client.hash]);
     assert.equal(stored.score, 749);
     assert.equal(Number(stored.remaining_seconds), 24.951);
+    assert.equal((await answer(client, 'Burma')).data.accepted, false);
+    const [[solved]] = await pool.execute<RowDataPacket[]>(`SELECT g.total_submissions FROM game_sessions g
+      JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?`, [client.hash]);
+    assert.equal(solved.total_submissions, 5);
   });
   it('does not award points for wrong answers or duplicate aliases', async () => {
     const client = player();
@@ -88,7 +92,18 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(replies.filter(reply => reply.data.accepted).length, 1);
     assert.equal((await client.request()).data.game.score.total, 100);
   });
-  it('expires at the server deadline and rejects an answer at exactly 30 seconds', async () => {
+  it('adds expired outcomes without changing existing submissions or credits', async () => {
+    const snapshot = async () => (await pool.query('SELECT * FROM player_submissions ORDER BY submission_id'))[0];
+    const before = await snapshot();
+    await pool.query('ALTER TABLE player_submissions DROP CHECK ck_submission_answer');
+    await pool.query(`ALTER TABLE player_submissions MODIFY COLUMN outcome ENUM('correct', 'duplicate', 'incorrect') NOT NULL,
+      ADD CONSTRAINT ck_submission_answer CHECK ((outcome = 'incorrect' AND answer_id IS NULL)
+        OR (outcome IN ('correct', 'duplicate') AND answer_id IS NOT NULL))`);
+    const migration = await readFile(new URL('../database/migrations/011_expired_submissions.sql', import.meta.url), 'utf8');
+    for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
+    assert.deepEqual(await snapshot(), before);
+  });
+  it('expires at the server deadline and records late guesses without credit', async () => {
     const client = player();
     const started = (await client.request('/start', {})).data.game.startedAt;
     for (const value of ['Mexico', 'Malta', 'Morocco', 'Mali']) await answer(client, value);
@@ -99,6 +114,25 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.deepEqual(late.data.game.score, { correctness: 400, speed: 0, total: 400 });
     assert.equal(late.data.game.finishedAt, started + GAME_DURATION);
     assert.equal((await client.request('/start', {})).data.game.status, 'finished');
+    now += 1234;
+    for (const value of ['Burma', 'Moon']) {
+      const retry = await answer(client, value);
+      assert.equal(retry.data.accepted, false);
+      assert.deepEqual(retry.data.game, late.data.game);
+    }
+    await client.request();
+    const [[stored]] = await pool.execute<RowDataPacket[]>(`SELECT g.*, p.total_games, p.total_score, p.last_played_at
+      FROM game_sessions g JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?`, [client.hash]);
+    assert.deepEqual([stored.total_submissions, stored.correct_count, stored.score, stored.total_games, stored.total_score], [7, 4, 400, 1, 400]);
+    assert.equal(stored.last_played_at.getTime(), now);
+    const [expired] = await pool.execute<RowDataPacket[]>(`SELECT guess, normalized_text, response_time_ms, answer_id, credited_answer_id
+      FROM player_submissions WHERE session_id = ? AND outcome = 'expired' ORDER BY submission_id`, [stored.session_id]);
+    assert.deepEqual(expired.map(row => Object.values(row)), [
+      ['Monaco', 'monaco', 30000, null, null], ['Burma', 'burma', 31234, null, null], ['Moon', 'moon', 31234, null, null],
+    ]);
+    await assert.rejects(pool.execute(`UPDATE player_submissions SET answer_id =
+      (SELECT id FROM accepted_answers WHERE challenge_date = ? LIMIT 1) WHERE session_id = ? AND outcome = 'expired'`,
+    [stored.challenge_date, stored.session_id]), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
   });
   it('restores the original start and score after recreating the server service', async () => {
     const client = player();
