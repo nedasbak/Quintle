@@ -33,6 +33,8 @@ Use the UTC date at the start of an attempt to identify its challenge. An attemp
 
 ## Scoring
 
+The current frontend preview also demonstrates rarity with explicitly labeled sample pick rates: +25 points for an answer picked by 11–25% of sample players, and +50 at 10% or less. Results separate correctness, speed, and rarity. These are illustrative values, not global player statistics. The base scoring rules below remain the foundation; with sample rarity bonuses the theoretical preview maximum is 1,050.
+
 **Score = (correct answers × 100) + (seconds remaining × 10).**
 
 Use precise elapsed time rather than rounded display seconds. Clamp remaining time to the range 0–30 seconds. For an integer score, floor the final formula once. A timeout gives zero time bonus; completing five answers early gives the bonus for the actual remaining time.
@@ -55,9 +57,9 @@ Browser-only progress is device/browser specific and may be lost when storage is
 
 | Token | Value |
 | --- | --- |
-| Ink | `#171717` |
-| Correct | `#16A34A` |
-| Canvas | `#F8F7F3` |
+| Ink | `#F4F5F6` |
+| Correct / accent | `#C1F26D` |
+| Canvas | `#111517` |
 
 Use large readable type, one input, five answer slots, subtle transitions, and immediate text feedback. Make keyboard submission and focus clear. Do not rely on color alone to explain validity. Keep gameplay visible on typical mobile screens with the on-screen keyboard open, and support small viewports without hiding controls.
 
