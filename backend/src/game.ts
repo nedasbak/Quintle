@@ -7,6 +7,7 @@ interface Session extends RowDataPacket {
   session_id: string;
   challenge_date: string;
   started_at_utc: Date;
+  expires_at: Date;
   finished_at_utc: Date | null;
   status: 'in_progress' | 'solved' | 'timed_out';
   correct_count: number;
@@ -62,17 +63,17 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       let feedback = { kind: 'hint', text: 'You’ve got this. Enter your first answer.' };
 
       // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
-      if (session?.status === 'in_progress' && remainingTime(session.started_at_utc.getTime(), now) === 0) {
+      if (session?.status === 'in_progress' && now >= session.expires_at.getTime()) {
         await connection.execute("UPDATE game_sessions SET status = 'timed_out', finished_at_utc = ? WHERE session_id = ?",
-          [new Date(session.started_at_utc.getTime() + GAME_DURATION), session.session_id]);
+          [session.expires_at, session.session_id]);
         session.status = 'timed_out';
         feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
       }
       if (action === 'start' && !session) {
         const sessionId = randomUUID();
         await connection.execute(
-          'INSERT INTO game_sessions (session_id, player_id, challenge_date, started_at_utc) VALUES (?, ?, ?, ?)',
-          [sessionId, player.player_id, today, new Date(now)],
+          'INSERT INTO game_sessions (session_id, player_id, challenge_date, started_at_utc, created_at) VALUES (?, ?, ?, ?, ?)',
+          [sessionId, player.player_id, today, new Date(now), new Date(now)],
         );
         const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [sessionId]);
         session = started;
@@ -91,6 +92,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
           [session.session_id, session.challenge_date, new Date(now), input, outcome, answer?.answer_id ?? null],
         );
         accepted = outcome === 'correct';
+        await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE session_id = ?', [session.session_id]);
         activityAt = new Date(now);
         if (accepted) {
           const count = session.correct_count + 1;

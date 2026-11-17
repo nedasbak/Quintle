@@ -74,6 +74,9 @@ backfill totals and streaks. The API refreshes statistics from completed attempt
 timeouts count as completed games. Stored current streaks update when the player returns.
 Apply `backend/database/migrations/007_session_uuids.sql` next to convert session IDs and
 their submission references to random UUIDs while preserving answers, scores, and deadlines.
+Then apply `backend/database/migrations/008_session_details.sql` for deadlines, millisecond
+time remaining, creation timestamps, and submission counts. Counts include correct, incorrect,
+and duplicate guesses. Deadlines and completion time remain derived from server timestamps.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
 Session field names/settings and submission details remain to be updated.
 

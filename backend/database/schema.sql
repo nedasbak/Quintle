@@ -57,9 +57,15 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_date DATE NOT NULL,
     started_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+    expires_at DATETIME(3) GENERATED ALWAYS AS (started_at_utc + INTERVAL 30 SECOND) STORED,
     finished_at_utc DATETIME(3) DEFAULT NULL,
     status ENUM('in_progress', 'solved', 'timed_out') NOT NULL DEFAULT 'in_progress',
     correct_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    total_submissions INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    remaining_time_ms INT UNSIGNED GENERATED ALWAYS AS (
+        CASE WHEN status = 'solved' THEN 30000 - TIMESTAMPDIFF(MICROSECOND, started_at_utc, finished_at_utc) DIV 1000 ELSE 0 END
+    ) STORED,
     -- Milisekundžių tikslumas išsaugomas iki galutinio taškų apvalinimo.
     remaining_seconds DECIMAL(5,3) UNSIGNED GENERATED ALWAYS AS (
         CASE status

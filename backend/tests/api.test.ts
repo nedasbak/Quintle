@@ -325,6 +325,48 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       assert.deepEqual(after, before);
     } finally { connection.release(); }
   });
+  it('records session details and backfills them without changing game history', async () => {
+    const client = player();
+    const started = (await client.request('/start', {})).data.game.startedAt;
+    const stored = async () => (await pool.execute<RowDataPacket[]>(`SELECT g.* FROM game_sessions g
+      JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?`, [client.hash]))[0][0];
+    assert.equal((await stored()).expires_at.getTime(), started + GAME_DURATION);
+    assert.equal((await stored()).created_at.getTime(), started);
+    assert.equal((await stored()).remaining_time_ms, 0);
+    await answer(client, 'Moon');
+    await answer(client, 'Burma');
+    await answer(client, 'Myanmar');
+    assert.equal((await stored()).total_submissions, 3);
+    now += 5049;
+    for (const value of ['Mexico', 'Malta', 'Morocco', 'Mali']) await answer(client, value);
+    assert.equal((await stored()).total_submissions, 7);
+    assert.equal((await stored()).remaining_time_ms, 24951);
+    assert.equal((await stored()).score, 749);
+    const original = (await client.request()).data;
+    assert.equal((await stored()).total_submissions, 7);
+    const connection = await pool.getConnection();
+    try {
+      await connection.query("SET time_zone = '+00:00'");
+      const [before] = await connection.query('SELECT * FROM game_sessions ORDER BY session_id');
+      await connection.query(`ALTER TABLE game_sessions DROP COLUMN expires_at, DROP COLUMN total_submissions,
+        DROP COLUMN created_at, DROP COLUMN remaining_time_ms`);
+      await connection.query("SET time_zone = '+05:30'");
+      const migration = await readFile(new URL('../database/migrations/008_session_details.sql', import.meta.url), 'utf8');
+      for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+      const [[zone]] = await connection.query<RowDataPacket[]>('SELECT @@session.time_zone AS zone');
+      assert.equal(zone.zone, '+05:30');
+      await connection.query("SET time_zone = '+00:00'");
+      const [after] = await connection.query('SELECT * FROM game_sessions ORDER BY session_id');
+      assert.deepEqual(after, before);
+      const [expired] = await connection.query<RowDataPacket[]>("SELECT remaining_time_ms, expires_at, finished_at_utc FROM game_sessions WHERE status = 'timed_out'");
+      assert.ok(expired.length > 0);
+      for (const session of expired) {
+        assert.equal(session.remaining_time_ms, 0);
+        assert.deepEqual(session.expires_at, session.finished_at_utc);
+      }
+    } finally { connection.release(); }
+    assert.deepEqual((await client.request()).data, original);
+  });
   it('adds challenge metadata to an existing database without losing content', async () => {
     const [before] = await pool.query<RowDataPacket[]>('SELECT challenge_date, category, prompt FROM daily_challenges ORDER BY challenge_date');
     await pool.query(`ALTER TABLE daily_challenges
