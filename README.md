@@ -12,7 +12,7 @@ Five answers. Thirty seconds. One daily challenge.
 
 - Frontend: React, JavaScript, Vite, Tailwind CSS
 - Backend: Node.js, Express, TypeScript
-- Database: Supabase (later)
+- Database: MySQL 8.0 (schema in `backend/database/schema.sql`)
 
 ## Folders
 
