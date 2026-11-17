@@ -42,7 +42,14 @@ CREATE TABLE IF NOT EXISTS answer_keys (
 CREATE TABLE IF NOT EXISTS players (
     id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     token_hash BINARY(32) NOT NULL,
-    created_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+    display_name VARCHAR(50) DEFAULT NULL,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    last_played_at TIMESTAMP(3) NULL DEFAULT NULL,
+    current_streak INT UNSIGNED NOT NULL DEFAULT 0,
+    longest_streak INT UNSIGNED NOT NULL DEFAULT 0,
+    last_completed_date DATE DEFAULT NULL,
+    total_games INT UNSIGNED NOT NULL DEFAULT 0,
+    total_score INT UNSIGNED NOT NULL DEFAULT 0,
     UNIQUE KEY uq_player_token (token_hash)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS game_sessions (

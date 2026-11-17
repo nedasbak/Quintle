@@ -69,8 +69,11 @@ Then apply `backend/database/migrations/004_answer_fields.sql` once to rename an
 fields, allow 255 characters, and add alias IDs and timestamps. Existing answer IDs remain valid.
 Apply `backend/database/migrations/005_player_uuids.sql` next to replace numeric player IDs
 with random UUIDs and preserve existing cookies, games, and scores.
+Then apply `backend/database/migrations/006_player_statistics.sql` to add profile fields and
+backfill totals and streaks. The API refreshes statistics from completed attempts on every request;
+timeouts count as completed games. Stored current streaks update when the player returns.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Player profile/statistics fields, session UUIDs/fields, and submission details remain to be updated.
+Session UUIDs/fields and submission details remain to be updated.
 
 ## Scoring and tests
 

@@ -8,6 +8,7 @@ import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { createApp } from '../src/app.ts';
 import { createGameService } from '../src/game.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
+import { getDailyChallenge } from '../../shared/challenges.mjs';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -212,7 +213,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     await client.request('/start', {});
     await answer(client, 'Mexico');
     const original = (await client.request()).data;
-    const snapshot = async () => (await pool.query<RowDataPacket[]>(`SELECT HEX(p.token_hash) AS token, p.created_at_utc,
+    const snapshot = async () => (await pool.query<RowDataPacket[]>(`SELECT HEX(p.token_hash) AS token, p.created_at,
       g.session_id, g.challenge_date, g.started_at_utc, g.finished_at_utc, g.status, g.correct_count, g.remaining_seconds, g.score,
       s.current_streak, s.longest_streak, s.last_played_date
       FROM players p LEFT JOIN game_sessions g ON g.player_id = p.id
@@ -241,6 +242,54 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       ['00000000-0000-4000-8000-000000000000', before.find(row => row.session_id)!.session_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
     await assert.rejects(pool.query(`INSERT INTO game_sessions (player_id, challenge_date, started_at_utc)
       SELECT player_id, challenge_date, started_at_utc FROM game_sessions LIMIT 1`), { code: 'ER_DUP_ENTRY' });
+  });
+  it('tracks player statistics across gaps and restores them from existing history', async () => {
+    const client = player();
+    const firstDay = Date.parse(new Date().toISOString().slice(0, 10)) - 4 * 86_400_000 + 43_200_000;
+    const profile = async () => (await pool.execute<RowDataPacket[]>('SELECT * FROM players WHERE token_hash = ?', [client.hash]))[0][0];
+    const totals = async () => { const p = await profile(); return [p.current_streak, p.longest_streak, p.total_games, p.total_score]; };
+    now = firstDay;
+    await client.request();
+    assert.equal((await profile()).display_name, null);
+    assert.equal((await profile()).last_played_at, null);
+    assert.deepEqual(await totals(), [0, 0, 0, 0]);
+    await client.request('/start', {});
+    now += 5049;
+    for (const variants of getDailyChallenge(now).answers.slice(0, 5)) await answer(client, variants[0]);
+    assert.deepEqual(await totals(), [1, 1, 1, 749]);
+    now = firstDay + 86_400_000;
+    await client.request('/start', {});
+    now += GAME_DURATION;
+    await client.request();
+    assert.deepEqual(await totals(), [2, 2, 2, 749]);
+    now = firstDay + 3 * 86_400_000;
+    await client.request();
+    assert.deepEqual(await totals(), [0, 2, 2, 749]);
+    const idle = await profile();
+    await client.request();
+    assert.deepEqual(await profile(), idle);
+    now = firstDay + 4 * 86_400_000;
+    await client.request('/start', {});
+    assert.deepEqual(await totals(), [0, 2, 2, 749]);
+    now += GAME_DURATION;
+    await client.request();
+    assert.deepEqual(await totals(), [1, 2, 3, 749]);
+    const connection = await pool.getConnection();
+    try {
+      await connection.query("SET time_zone = '+00:00'");
+      const [before] = await connection.query('SELECT * FROM players ORDER BY id');
+      await connection.query(`ALTER TABLE players CHANGE COLUMN created_at created_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+        DROP COLUMN display_name, DROP COLUMN last_played_at, DROP COLUMN current_streak, DROP COLUMN longest_streak,
+        DROP COLUMN last_completed_date, DROP COLUMN total_games, DROP COLUMN total_score`);
+      await connection.query("SET time_zone = '+05:30'");
+      const migration = await readFile(new URL('../database/migrations/006_player_statistics.sql', import.meta.url), 'utf8');
+      for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+      const [[zone]] = await connection.query<RowDataPacket[]>('SELECT @@session.time_zone AS zone');
+      assert.equal(zone.zone, '+05:30');
+      await connection.query("SET time_zone = '+00:00'");
+      const [after] = await connection.query('SELECT * FROM players ORDER BY id');
+      assert.deepEqual(after, before);
+    } finally { connection.release(); }
   });
   it('adds challenge metadata to an existing database without losing content', async () => {
     const [before] = await pool.query<RowDataPacket[]>('SELECT challenge_date, category, prompt FROM daily_challenges ORDER BY challenge_date');

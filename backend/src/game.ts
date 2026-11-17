@@ -40,6 +40,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
   return async function play(tokenHash: Buffer, action: Action, input?: string) {
     const connection = await pool.getConnection();
     try {
+      await connection.query("SET time_zone = '+00:00'");
       await connection.beginTransaction();
       await connection.execute('INSERT IGNORE INTO players (id, token_hash) VALUES (?, ?)', [randomUUID(), tokenHash]);
       const [[player]] = await connection.execute<RowDataPacket[]>(
@@ -57,6 +58,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       );
       let session = active ?? daily;
       let accepted = false;
+      let activityAt: Date | null = null;
       let feedback = { kind: 'hint', text: 'You’ve got this. Enter your first answer.' };
 
       // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
@@ -73,6 +75,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         );
         const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [created.insertId]);
         session = started;
+        activityAt = new Date(now);
       } else if (action === 'answer' && session?.status === 'in_progress') {
         const [[answer]] = await connection.execute<RowDataPacket[]>(
           'SELECT a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_key = ?',
@@ -87,6 +90,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
           [session.session_id, session.challenge_date, new Date(now), input, outcome, answer?.answer_id ?? null],
         );
         accepted = outcome === 'correct';
+        activityAt = new Date(now);
         if (accepted) {
           const count = session.correct_count + 1;
           await connection.execute('UPDATE game_sessions SET correct_count = ?, status = ?, finished_at_utc = ? WHERE session_id = ?',
@@ -115,6 +119,17 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const [results] = await connection.execute<RowDataPacket[]>(
         'SELECT challenge_date AS date, correct_count AS correct, score FROM game_sessions WHERE player_id = ? AND finished_at_utc IS NOT NULL ORDER BY challenge_date', [player.player_id],
       );
+      const completed = results.filter(result => result.date <= today);
+      let streak = 0, longest = 0, lastDate: string | null = null;
+      for (const result of completed) {
+        streak = lastDate && Date.parse(result.date) - Date.parse(lastDate) === 86_400_000 ? streak + 1 : 1;
+        longest = Math.max(longest, streak);
+        lastDate = result.date;
+      }
+      if (!lastDate || Date.parse(today) - Date.parse(lastDate) > 86_400_000) streak = 0;
+      await connection.execute(`UPDATE players SET current_streak = ?, longest_streak = ?, last_completed_date = ?,
+        total_games = ?, total_score = ?, last_played_at = COALESCE(?, last_played_at) WHERE id = ?`,
+      [streak, longest, lastDate, completed.length, completed.reduce((sum, result) => sum + Number(result.score), 0), activityAt, player.player_id]);
       const response = {
         game: {
           challenge: { date, number: getDailyChallenge(Date.parse(date)).number, category: challenge.category, prompt: challenge.prompt },
