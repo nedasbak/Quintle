@@ -91,7 +91,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         ) : [[]];
         const outcome = expired ? 'expired' : !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
         await connection.execute(
-          'INSERT INTO player_submissions (session_id, challenge_date, submitted_at_utc, guess, normalized_text, response_time_ms, outcome, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO player_submissions (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, outcome, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [session.session_id, session.challenge_date, new Date(now), input, normalized,
             Math.max(0, now - session.started_at_utc.getTime()), outcome, answer?.answer_id ?? null],
         );

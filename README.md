@@ -84,8 +84,11 @@ after 009, with the API stopped and a backup. It backfills Unicode-normalized gu
 millisecond response times, and submission indexes while preserving original input.
 Then apply `backend/database/migrations/011_expired_submissions.sql` to record late guesses
 as expired. They count as submissions but never earn points or fill answer slots.
+Apply `backend/database/migrations/012_submission_input_fields.sql` next to rename `guess`
+to `submitted_text` and `submitted_at_utc` to `submitted_at`. Timestamps remain UTC;
+existing input, IDs, scores, and submission indexes are preserved.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Session/submission field names and challenge availability settings remain to be updated.
+Session field names/statuses, submission IDs/results, and challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

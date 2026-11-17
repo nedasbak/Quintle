@@ -125,7 +125,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       FROM game_sessions g JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?`, [client.hash]);
     assert.deepEqual([stored.total_submissions, stored.correct_count, stored.score, stored.total_games, stored.total_score], [7, 4, 400, 1, 400]);
     assert.equal(stored.last_played_at.getTime(), now);
-    const [expired] = await pool.execute<RowDataPacket[]>(`SELECT guess, normalized_text, response_time_ms, answer_id, credited_answer_id
+    const [expired] = await pool.execute<RowDataPacket[]>(`SELECT submitted_text, normalized_text, response_time_ms, answer_id, credited_answer_id
       FROM player_submissions WHERE session_id = ? AND outcome = 'expired' ORDER BY submission_id`, [stored.session_id]);
     assert.deepEqual(expired.map(row => Object.values(row)), [
       ['Monaco', 'monaco', 30000, null, null], ['Burma', 'burma', 31234, null, null], ['Moon', 'moon', 31234, null, null],
@@ -364,7 +364,9 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
         DROP COLUMN last_completed_date, DROP COLUMN total_games, DROP COLUMN total_score`);
       await connection.query("SET time_zone = '+05:30'");
       const migration = await readFile(new URL('../database/migrations/006_player_statistics.sql', import.meta.url), 'utf8');
+      await connection.query('ALTER TABLE player_submissions RENAME COLUMN submitted_at TO submitted_at_utc');
       for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await connection.query(statement);
+      await connection.query('ALTER TABLE player_submissions RENAME COLUMN submitted_at_utc TO submitted_at');
       const [[zone]] = await connection.query<RowDataPacket[]>('SELECT @@session.time_zone AS zone');
       assert.equal(zone.zone, '+05:30');
       await connection.query("SET time_zone = '+00:00'");
@@ -441,7 +443,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(scores[1].Collation, 'D');
     assert.deepEqual((await client.request()).data, original);
   });
-  it('preserves raw guesses and backfills Unicode normalization and response times', async () => {
+  it('backfills submission details and renames input fields without losing history', async () => {
     const client = player();
     const started = (await client.request('/start', {})).data.game.startedAt;
     now += 1234;
@@ -452,7 +454,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal((await answer(client, '\uFDFA'.repeat(80))).status, 400);
     const [rows] = await pool.execute<RowDataPacket[]>(`SELECT s.* FROM player_submissions s JOIN game_sessions g ON g.session_id = s.session_id
       JOIN players p ON p.id = g.player_id WHERE p.token_hash = ? ORDER BY s.submission_id`, [client.hash]);
-    assert.deepEqual(rows.map(row => [row.guess, row.normalized_text, row.response_time_ms, row.outcome]), [
+    assert.deepEqual(rows.map(row => [row.submitted_text, row.normalized_text, row.response_time_ms, row.outcome]), [
       ['  BÚRMA\t', 'burma', 1234, 'correct'], ['Myanmar', 'myanmar', 1734, 'duplicate'], ['Moon\u00a0 \t', 'moon', 1734, 'incorrect'],
     ]);
     now = started + 5049;
@@ -465,17 +467,20 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       const legacy = Array.from({ length: 501 }, (_, i) => [rows[0].session_id, rows[0].challenge_date,
         new Date(started + 2000), `  Legacy ${i}  `, `legacy ${i}`, 2000, 'incorrect']);
       await connection.query(`INSERT INTO player_submissions
-        (session_id, challenge_date, submitted_at_utc, guess, normalized_text, response_time_ms, outcome) VALUES ?`, [legacy]);
+        (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, outcome) VALUES ?`, [legacy]);
       await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + ? WHERE session_id = ?', [legacy.length, rows[0].session_id]);
       const snapshot = async () => Promise.all([['game_sessions', 'session_id'], ['player_submissions', 'submission_id'], ['players', 'id']]
         .map(async ([table, key]) => (await connection.query(`SELECT * FROM ${table} ORDER BY ${key}`))[0]));
       const before = await snapshot();
+      await connection.query(`ALTER TABLE player_submissions RENAME COLUMN submitted_text TO guess,
+        RENAME COLUMN submitted_at TO submitted_at_utc`);
       await connection.query(`ALTER TABLE player_submissions DROP INDEX ix_submission_received, DROP INDEX ix_submission_answer_result,
         DROP COLUMN normalized_text, DROP COLUMN response_time_ms, MODIFY COLUMN guess VARCHAR(191) NOT NULL`);
       await migrateSubmissionDetails(connection);
+      await connection.query(await readFile(new URL('../database/migrations/012_submission_input_fields.sql', import.meta.url), 'utf8'));
       assert.deepEqual(await snapshot(), before);
       const [indexes] = await connection.query<RowDataPacket[]>("SHOW INDEX FROM player_submissions WHERE Key_name = 'ix_submission_received'");
-      assert.deepEqual(indexes.map(index => index.Column_name), ['session_id', 'submitted_at_utc']);
+      assert.deepEqual(indexes.map(index => index.Column_name), ['session_id', 'submitted_at']);
     } finally { connection.release(); }
     assert.deepEqual((await client.request()).data, original);
   });
