@@ -18,23 +18,26 @@ CREATE TABLE IF NOT EXISTS daily_challenges (
     CONSTRAINT ck_challenge_active CHECK (is_active IN (0, 1))
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS accepted_answers (
-    answer_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     challenge_id BIGINT UNSIGNED NOT NULL,
     challenge_date DATE NOT NULL,
-    display_answer VARCHAR(191) NOT NULL,
+    answer VARCHAR(255) NOT NULL,
     created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    UNIQUE KEY uq_answer_challenge_id (challenge_date, answer_id),
-    UNIQUE KEY uq_answer_display (challenge_id, display_answer),
+    UNIQUE KEY uq_answer_challenge_id (challenge_date, id),
+    UNIQUE KEY uq_answer_display (challenge_id, answer),
     CONSTRAINT fk_answer_challenge FOREIGN KEY (challenge_id, challenge_date)
         REFERENCES daily_challenges (id, challenge_date)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS answer_keys (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     challenge_date DATE NOT NULL,
-    normalized_answer VARCHAR(191) COLLATE utf8mb4_0900_bin NOT NULL,
+    normalized_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,
     answer_id BIGINT UNSIGNED NOT NULL,
-    PRIMARY KEY (challenge_date, normalized_answer),
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uq_key_challenge (challenge_date, normalized_key),
+    UNIQUE KEY uq_key_answer (answer_id, normalized_key),
     CONSTRAINT fk_answer_key_answer FOREIGN KEY (challenge_date, answer_id)
-        REFERENCES accepted_answers (challenge_date, answer_id)
+        REFERENCES accepted_answers (challenge_date, id)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS players (
     player_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -97,7 +100,7 @@ CREATE TABLE IF NOT EXISTS player_submissions (
     CONSTRAINT fk_submission_session FOREIGN KEY (session_id, challenge_date)
         REFERENCES game_sessions (session_id, challenge_date),
     CONSTRAINT fk_submission_answer FOREIGN KEY (challenge_date, answer_id)
-        REFERENCES accepted_answers (challenge_date, answer_id),
+        REFERENCES accepted_answers (challenge_date, id),
     CONSTRAINT ck_submission_answer CHECK (
         (outcome = 'incorrect' AND answer_id IS NULL)
         OR (outcome IN ('correct', 'duplicate') AND answer_id IS NOT NULL)
@@ -150,7 +153,7 @@ WITH daily_totals AS (
     WHERE s.outcome = 'correct'
     GROUP BY g.challenge_date, s.answer_id
 )
-SELECT a.challenge_date, a.answer_id, a.display_answer,
+SELECT a.challenge_date, a.id AS answer_id, a.answer AS display_answer,
        COALESCE(t.finished_rounds, 0) AS finished_rounds,
        COALESCE(c.credited_rounds, 0) AS credited_rounds,
        ROUND(100.0 * COALESCE(c.credited_rounds, 0)
@@ -158,5 +161,5 @@ SELECT a.challenge_date, a.answer_id, a.display_answer,
 FROM accepted_answers AS a
 LEFT JOIN daily_totals AS t ON t.challenge_date = a.challenge_date
 LEFT JOIN answer_totals AS c
-    ON c.challenge_date = a.challenge_date AND c.answer_id = a.answer_id;
+    ON c.challenge_date = a.challenge_date AND c.answer_id = a.id;
 SHOW FULL TABLES FROM quintle;

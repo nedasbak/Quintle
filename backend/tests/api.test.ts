@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { after, before, describe, it } from 'node:test';
 import type { Server } from 'node:http';
 import { createPool } from 'mysql2/promise';
-import type { RowDataPacket } from 'mysql2/promise';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { createApp } from '../src/app.ts';
 import { createGameService } from '../src/game.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
@@ -148,12 +148,19 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const [after] = await pool.query<RowDataPacket[]>('SELECT session_id, score FROM game_sessions ORDER BY session_id');
     assert.deepEqual(after, before);
   });
-  it('migrates challenge IDs without losing answers, aliases, sessions, or scores', async () => {
+  it('migrates challenge and answer fields without losing answers, aliases, sessions, or scores', async () => {
     const snapshot = async () => Promise.all(['daily_challenges', 'accepted_answers', 'answer_keys', 'game_sessions', 'player_submissions'].map(async table => {
       const [rows] = await pool.query<RowDataPacket[]>(`SELECT * FROM ${table}`);
-      return rows.map(({ id, challenge_id, created_at, updated_at, ...row }) => row);
+      return rows.map(({ id, challenge_id, created_at, updated_at, ...row }) => table === 'accepted_answers' ? { id, ...row } : row)
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     }));
     const before = await snapshot();
+    await pool.query(`ALTER TABLE answer_keys DROP PRIMARY KEY, DROP INDEX uq_key_challenge, DROP INDEX uq_key_answer,
+      DROP COLUMN id, DROP COLUMN created_at,
+      CHANGE COLUMN normalized_key normalized_answer VARCHAR(191) COLLATE utf8mb4_0900_bin NOT NULL,
+      ADD PRIMARY KEY (challenge_date, normalized_answer)`);
+    await pool.query('ALTER TABLE accepted_answers RENAME COLUMN id TO answer_id, ALGORITHM = INPLACE');
+    await pool.query('ALTER TABLE accepted_answers CHANGE COLUMN answer display_answer VARCHAR(191) NOT NULL');
     await pool.query('ALTER TABLE accepted_answers DROP FOREIGN KEY fk_answer_challenge');
     await pool.query(`ALTER TABLE accepted_answers
       DROP INDEX uq_answer_display,
@@ -165,8 +172,10 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     await pool.query('ALTER TABLE daily_challenges DROP INDEX uq_challenge_date');
     const migration = await readFile(new URL('../database/migrations/003_challenge_ids.sql', import.meta.url), 'utf8');
     for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
+    const answerMigration = await readFile(new URL('../database/migrations/004_answer_fields.sql', import.meta.url), 'utf8');
+    for (const statement of answerMigration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
     assert.deepEqual(await snapshot(), before);
-    const [links] = await pool.query<RowDataPacket[]>(`SELECT a.answer_id, a.challenge_id, c.id, a.created_at
+    const [links] = await pool.query<RowDataPacket[]>(`SELECT a.id AS answer_id, a.challenge_id, c.id, a.created_at
       FROM accepted_answers a JOIN daily_challenges c ON c.challenge_date = a.challenge_date`);
     assert.ok(links.length > 0);
     for (const link of links) {
@@ -175,8 +184,25 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     }
     const other = links.find(link => link.id !== links[0].id)!;
     assert.ok(other);
-    await assert.rejects(pool.execute('UPDATE accepted_answers SET challenge_id = ? WHERE answer_id = ?',
+    await assert.rejects(pool.execute('UPDATE accepted_answers SET challenge_id = ? WHERE id = ?',
       [other.id, links[0].answer_id]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    const [keys] = await pool.query<RowDataPacket[]>('SELECT * FROM answer_keys');
+    assert.equal(new Set(keys.map(key => key.id)).size, keys.length);
+    for (const key of keys) assert.ok(Number.isFinite(key.created_at.getTime()));
+    const key = keys.find(key => key.answer_id === links[0].answer_id)!;
+    const otherAnswer = links.find(link => link.id === links[0].id && link.answer_id !== key.answer_id)!;
+    for (const answerId of [key.answer_id, otherAnswer.answer_id]) {
+      await assert.rejects(pool.execute('INSERT INTO answer_keys (challenge_date, normalized_key, answer_id) VALUES (?, ?, ?)',
+        [key.challenge_date, key.normalized_key, answerId]), { code: 'ER_DUP_ENTRY' });
+    }
+    const [[stats]] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM answer_rarity_stats');
+    assert.equal(stats.count, links.length);
+    const longText = 'a'.repeat(255);
+    const [longAnswer] = await pool.execute<ResultSetHeader>(
+      'INSERT INTO accepted_answers (challenge_id, challenge_date, answer) VALUES (?, ?, ?)',
+      [links[0].id, key.challenge_date, longText]);
+    await pool.execute('INSERT INTO answer_keys (challenge_date, normalized_key, answer_id) VALUES (?, ?, ?)',
+      [key.challenge_date, longText, longAnswer.insertId]);
     const client = player();
     await client.request('/start', {});
     assert.equal((await answer(client, 'Burma')).data.accepted, true);

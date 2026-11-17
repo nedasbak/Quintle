@@ -65,8 +65,10 @@ re-running it preserves existing dates and player data. Replace starter content 
 Existing databases: stop the API, back up the database, then apply
 `backend/database/migrations/003_challenge_ids.sql` once after migration 002.
 It adds challenge IDs and links existing answers without replacing their IDs or dates.
-Fresh imports of `schema.sql` already include these changes. Answer/key naming,
-player UUIDs/statistics, session UUIDs/fields, and submission details remain to be updated.
+Then apply `backend/database/migrations/004_answer_fields.sql` once to rename answer/key
+fields, allow 255 characters, and add alias IDs and timestamps. Existing answer IDs remain valid.
+Fresh imports of `schema.sql` already include both migrations; do not apply them again.
+Player UUIDs/statistics, session UUIDs/fields, and submission details remain to be updated.
 
 ## Scoring and tests
 

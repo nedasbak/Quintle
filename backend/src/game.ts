@@ -24,11 +24,11 @@ async function ensureChallenge(connection: PoolConnection, now: number) {
   if (!insert.affectedRows) return;
   for (const variants of challenge.answers) {
     const [answer] = await connection.execute<ResultSetHeader>(
-      'INSERT INTO accepted_answers (challenge_id, challenge_date, display_answer) VALUES (?, ?, ?)',
+      'INSERT INTO accepted_answers (challenge_id, challenge_date, answer) VALUES (?, ?, ?)',
       [insert.insertId, challenge.date, variants[0]],
     );
     for (const key of new Set(variants.map(normalizeAnswer))) {
-      await connection.execute('INSERT INTO answer_keys (challenge_date, normalized_answer, answer_id) VALUES (?, ?, ?)',
+      await connection.execute('INSERT INTO answer_keys (challenge_date, normalized_key, answer_id) VALUES (?, ?, ?)',
         [challenge.date, key, answer.insertId]);
     }
   }
@@ -74,7 +74,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         session = started;
       } else if (action === 'answer' && session?.status === 'in_progress') {
         const [[answer]] = await connection.execute<RowDataPacket[]>(
-          'SELECT a.answer_id, a.display_answer FROM answer_keys k JOIN accepted_answers a ON a.answer_id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_answer = ?',
+          'SELECT a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_key = ?',
           [session.challenge_date, normalizeAnswer(input!)],
         );
         const [[duplicate]] = answer ? await connection.execute<RowDataPacket[]>(
@@ -104,7 +104,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const date = session?.challenge_date ?? today;
       const [[challenge]] = await connection.execute<RowDataPacket[]>('SELECT category, prompt FROM daily_challenges WHERE challenge_date = ?', [date]);
       const [answers] = session ? await connection.execute<RowDataPacket[]>(
-        "SELECT a.display_answer FROM player_submissions s JOIN accepted_answers a ON a.answer_id = s.answer_id WHERE s.session_id = ? AND s.outcome = 'correct' ORDER BY s.submission_id", [session.session_id],
+        "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.outcome = 'correct' ORDER BY s.submission_id", [session.session_id],
       ) : [[]];
       const finished = !!session?.finished_at_utc;
       const remaining = session ? remainingTime(session.started_at_utc.getTime(), session.finished_at_utc?.getTime() ?? now) : GAME_DURATION;
