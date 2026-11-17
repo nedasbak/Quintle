@@ -7,6 +7,15 @@ import { createResultLink } from '../src/features/game/resultLinks.js';
 const startedAt = Date.parse('2026-11-17T12:00:00Z');
 const game = { challenge: getDailyChallenge(startedAt), status: 'finished', answers: ['Mexico'], startedAt, finishedAt: startedAt + 30_000 };
 const link = () => createResultLink(game);
+// Grįžtant į pradžią imituojamas tik pradinis serverio atsakymas.
+vi.mock('../src/features/game/api.js', async () => {
+  const { getDailyChallenge } = await import('../src/features/game/challenges.js');
+  return { getGame: vi.fn(async () => ({
+    game: { challenge: { ...getDailyChallenge(), prompt: 'Today’s challenge' }, status: 'ready', answers: [], startedAt: null, finishedAt: null,
+      score: { correctness: 0, speed: 0, total: 0 } },
+    serverNow: Date.now(), accepted: false, feedback: { kind: 'hint', text: '' }, results: [],
+  })), startGame: vi.fn(), submitAnswer: vi.fn() };
+});
 beforeEach(() => { window.history.replaceState(null, '', '/'); localStorage.clear(); });
 afterEach(() => window.history.replaceState(null, '', '/'));
 
@@ -31,11 +40,11 @@ describe('shared match results', () => {
     expect(screen.getByRole('link', { name: 'Play today’s challenge' })).toBeInTheDocument();
   });
 
-  it('handles navigation to a shared link and back without reloading', () => {
-    render(<App />);
+  it('handles navigation to a shared link and back without reloading', async () => {
+    await act(async () => render(<App />));
     act(() => { window.history.replaceState(null, '', link()); window.dispatchEvent(new HashChangeEvent('hashchange')); });
     expect(screen.getByLabelText('Total score')).toHaveTextContent('100');
-    act(() => { window.history.replaceState(null, '', '/'); window.dispatchEvent(new HashChangeEvent('hashchange')); });
+    await act(async () => { window.history.replaceState(null, '', '/'); window.dispatchEvent(new HashChangeEvent('hashchange')); });
     expect(screen.getByRole('button', { name: 'Start challenge' })).toBeInTheDocument();
   });
 });

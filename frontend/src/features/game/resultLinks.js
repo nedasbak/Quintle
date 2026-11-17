@@ -1,18 +1,27 @@
 import { GAME_DURATION, getDailyChallenge } from './challenges.js';
+import { MAX_ANSWERS, MAX_ANSWER_LENGTH } from '../../../../shared/gameRules.mjs';
 
 const PREFIX = '#results=';
 
-// Version 1 stores canonical answer names so fixture ordering can change safely.
+// Senos nuorodos palaikomos, o naujos išsaugo serverio užduoties viešą tekstą.
 function restoreResult(payload) {
-  if (!payload || payload.v !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) return null;
+  if (!payload || ![1, 2].includes(payload.v) || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) return null;
   const timestamp = Date.parse(payload.date);
   if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== payload.date) return null;
-  const challenge = getDailyChallenge(timestamp);
+  let challenge = getDailyChallenge(timestamp);
   const { answers, elapsed } = payload;
-  if (!Array.isArray(answers) || answers.length > 5 || new Set(answers).size !== answers.length) return null;
-  if (!answers.every((answer) => challenge.answers.some((variants) => variants[0] === answer))) return null;
+  if (!Array.isArray(answers) || answers.length > MAX_ANSWERS || new Set(answers).size !== answers.length) return null;
+  if (payload.v === 1) {
+    if (!answers.every((answer) => challenge.answers.some((variants) => variants[0] === answer))) return null;
+  } else {
+    const metadata = payload.challenge;
+    if (!metadata || typeof metadata.category !== 'string' || !metadata.category.trim() || metadata.category.length > 100
+      || typeof metadata.prompt !== 'string' || !metadata.prompt.trim() || metadata.prompt.length > 255) return null;
+    if (!answers.every(answer => typeof answer === 'string' && answer.trim() && answer.length <= MAX_ANSWER_LENGTH)) return null;
+    challenge = { date: payload.date, number: challenge.number, category: metadata.category, prompt: metadata.prompt };
+  }
   if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > GAME_DURATION) return null;
-  if (answers.length < 5 && elapsed !== GAME_DURATION) return null;
+  if (answers.length < MAX_ANSWERS && elapsed !== GAME_DURATION) return null;
   return {
     challenge,
     status: 'finished',
@@ -38,10 +47,14 @@ export function readResultLink(hash) {
 
 export function createResultLink(game, baseUrl = window.location.href) {
   const payload = {
-    v: 1,
+    v: 2,
     date: game.challenge.date,
     answers: game.answers,
     elapsed: game.finishedAt - game.startedAt,
+    challenge: {
+      category: game.challenge.category,
+      prompt: game.challenge.prompt ?? `Name ${MAX_ANSWERS} ${game.challenge.title.charAt(0).toLowerCase()}${game.challenge.title.slice(1)}`,
+    },
   };
   if (game.status !== 'finished' || !restoreResult(payload)) throw new Error('Only completed games can be shared.');
   const bytes = new TextEncoder().encode(JSON.stringify(payload));

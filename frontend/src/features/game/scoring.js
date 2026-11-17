@@ -21,8 +21,9 @@ export function getAnswerDetails(answer) {
 }
 
 export function getScoreBreakdown(answers, remainingMs = 0) {
-  const correctness = answers.length * 100;
+  // Retumo peržiūra rodoma atskirai ir nekeičia pagrindinės taškų formulės.
+  const correctness = calculateScore(answers.length, 0);
   const speed = calculateScore(0, remainingMs);
   const rarity = answers.reduce((total, answer) => total + getAnswerDetails(answer).bonus, 0);
-  return { correctness, speed, rarity, total: correctness + speed + rarity };
+  return { correctness, speed, rarity, total: correctness + speed };
 }

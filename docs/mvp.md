@@ -33,7 +33,7 @@ Use the UTC date at the start of an attempt to identify its challenge. An attemp
 
 ## Scoring
 
-The current frontend preview also demonstrates rarity with explicitly labeled sample pick rates: +25 points for an answer picked by 11–25% of sample players, and +50 at 10% or less. Results separate correctness, speed, and rarity. These are illustrative values, not global player statistics. The base scoring rules below remain the foundation; with sample rarity bonuses the theoretical preview maximum is 1,050.
+The interface also demonstrates rarity with explicitly labeled sample pick rates. These illustrative values are shown separately and do not affect the server-confirmed score.
 
 **Score = (correct answers × 100) + (seconds remaining × 10).**
 
@@ -65,13 +65,12 @@ Use large readable type, one input, five answer slots, subtle transitions, and i
 
 ## Storage and services
 
-Begin with curated backend content and local player results. Introduce Supabase PostgreSQL when persistent server data is needed:
+Use MySQL 8.0 with the schema in `backend/database/schema.sql`:
 
-- `challenges`: UTC date, prompt, canonical answers, and aliases.
-- `submissions`: challenge ID, anonymous player ID, submitted answers, elapsed time, and score.
-- Later, `answer_counts`: aggregate counts for global rarity.
+- `daily_challenges`, `accepted_answers`, `answer_keys`: UTC category, canonical answers, and aliases.
+- `players`, `game_sessions`, `player_submissions`: anonymous identity, server timestamps, accepted answers, and generated scores.
 
-Final schema, migrations, and the API contract will be designed during implementation. Anonymous identifiers support submissions without user accounts; they do not establish a verified identity.
+`GET /api/game`, `POST /api/game/start` and `POST /api/game/answers` return the authoritative game state and score. An HttpOnly cookie identifies the anonymous player; client-supplied points and timestamps are rejected. Anonymous identifiers support submissions without user accounts; they do not establish a verified identity.
 
 ## MVP scope
 

@@ -91,14 +91,15 @@ describe('frontend sample rarity scoring', () => {
     expect(getAnswerDetails('Unknown')).toMatchObject({ pickRate: null, bonus: 0, label: 'Unrated' });
   });
 
-  it('separates correctness, precise speed, and rarity into one deterministic total', () => {
-    expect(getScoreBreakdown(['Mexico', 'Mali', 'Micronesia'], 12_345)).toEqual({ correctness: 300, speed: 123, rarity: 75, total: 498 });
+  // Retumo peržiūra nebegali pakeisti pagrindinės formulės rezultato.
+  it('keeps sample rarity separate from correctness and precise speed', () => {
+    expect(getScoreBreakdown(['Mexico', 'Mali', 'Micronesia'], 12_345)).toEqual({ correctness: 300, speed: 123, rarity: 75, total: 423 });
     expect(getScoreBreakdown([])).toEqual({ correctness: 0, speed: 0, rarity: 0, total: 0 });
   });
 
-  it('preserves a score above the previous 800-point cap in local history', () => {
+  it('saves the base score without sample rarity bonuses', () => {
     const answers = ['Malawi', 'Marshall Islands', 'Mauritania', 'Micronesia', 'Montenegro'];
     saveResult(finishGame({ ...newGame(now), status: 'playing', startedAt: now, answers }, now));
-    expect(getResults()).toEqual([{ date: '2026-11-17', correct: 5, score: 1050 }]);
+    expect(getResults()).toEqual([{ date: '2026-11-17', correct: 5, score: 800 }]);
   });
 });

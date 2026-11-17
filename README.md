@@ -8,10 +8,10 @@ Five answers. Thirty seconds. One daily challenge.
 - [Git](https://git-scm.com/)
 - [VS Code](https://code.visualstudio.com/) (recommended)
 
-## Planned stack
+## Stack
 
 - Frontend: React, JavaScript, Vite, Tailwind CSS
-- Backend: Node.js, Express, TypeScript
+- Backend: Node.js 24, Express, TypeScript (native Node.js type stripping)
 - Database: MySQL 8.0 (schema in `backend/database/schema.sql`)
 
 ## Folders
@@ -22,17 +22,56 @@ Five answers. Thirty seconds. One daily challenge.
 
 ## Run
 
+Start MySQL 8.0 and import `backend/database/schema.sql`. For an existing database,
+also apply `backend/database/migrations/001_precise_scoring.sql` once; `CREATE TABLE IF NOT EXISTS`
+does not update existing generated columns. The migration preserves sessions and recalculates
+their scores using the original timestamps.
+
+Set the connection URL in your shell (replace the placeholders with your database settings;
+URL-encode special characters in the username/password):
+
 ```powershell
+$env:DATABASE_URL = 'mysql://USER:PASSWORD@HOST:PORT/quintle'
 npm.cmd install
 npm.cmd run dev
 ```
 
 Use `npm` instead of `npm.cmd` outside Windows PowerShell.
 
-`npm run build` builds the frontend. `npm test` runs the tests.
+`npm run dev` starts the API and Vite together. The API uses `PORT` (default 3001)
+and `HOST` (default loopback). Vite proxies `/api` to the API; set `API_PROXY_TARGET`
+only when the backend runs at a different address. No extra configuration files are required.
 
-The game UI runs locally with sample challenges and browser-saved progress. Express and server validation will be added later.
+`npm run build` checks backend types and builds the frontend. `npm start` serves the API
+and the built frontend together. `npm run preview` starts the API alongside Vite's build preview.
+Set `NODE_ENV=production` when deploying over HTTPS
+so the player cookie is also marked Secure.
 
-Rarity bonuses use sample pick rates for the frontend preview, not real player data.
+The server identifies anonymous players through an HttpOnly cookie, stores sessions in MySQL,
+validates answers and aliases, and determines elapsed time. Refreshing or restarting the API
+does not restart an attempt. The existing curated categories initialize missing daily content;
+database content already present is preserved.
+
+## Scoring and tests
+
+The score is `floor(correct answers × 100 + remaining milliseconds / 1000 × 10)`.
+The remaining time is limited to 0–30 seconds. A timeout has no speed bonus.
+For example, five answers completed in 5.049 seconds earn 749 points. The maximum is 800.
+Sample rarity remains a separate UI preview and does not affect the official score.
+
+`npm test` runs UI and scoring tests. MySQL integration tests run when `TEST_DATABASE_URL`
+identifies an isolated test database. To automatically create and remove a temporary MySQL 8.0
+Docker container, run:
+
+```powershell
+npm.cmd run test:integration --workspace backend
+```
+
+The integration tests cover real HTTP requests, stored scores, precise time, late answers,
+duplicates, concurrent submissions, session recovery, input validation, UTC midnight and migration.
+Use an isolated database for `TEST_DATABASE_URL`: the migration test exercises the old scoring definition.
 
 Share results copies a match link. Shared matches open without browser storage; answers stay hidden until revealed. Links use the current site address, so deploy the frontend to share beyond localhost.
+
+Shared links contain public match details for display; they are never accepted as server submissions
+or imported as another player's progress. Existing version 1 links remain supported.

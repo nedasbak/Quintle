@@ -37,16 +37,17 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     finished_at_utc DATETIME(3) DEFAULT NULL,
     status ENUM('in_progress', 'solved', 'timed_out') NOT NULL DEFAULT 'in_progress',
     correct_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
-    remaining_seconds TINYINT UNSIGNED GENERATED ALWAYS AS (
+    -- Milisekundžių tikslumas išsaugomas iki galutinio taškų apvalinimo.
+    remaining_seconds DECIMAL(5,3) UNSIGNED GENERATED ALWAYS AS (
         CASE status
             WHEN 'solved' THEN 30 - (
-                TIMESTAMPDIFF(MICROSECOND, started_at_utc, finished_at_utc) DIV 1000000
+                TIMESTAMPDIFF(MICROSECOND, started_at_utc, finished_at_utc) / 1000000
             )
             WHEN 'timed_out' THEN 0
         END
     ) STORED,
     score SMALLINT UNSIGNED GENERATED ALWAYS AS (
-        100 * correct_count + 10 * remaining_seconds
+        FLOOR(100 * correct_count + 10 * remaining_seconds)
     ) STORED,
     UNIQUE KEY uq_session_player_day (player_id, challenge_date),
     UNIQUE KEY uq_session_id_day (session_id, challenge_date),

@@ -77,9 +77,16 @@ export function saveResult(game) {
   const entry = {
     date: game.challenge.date,
     correct: game.answers.length,
-    score: getScoreBreakdown(game.answers, remainingTime(game.startedAt, game.finishedAt)).total,
+    // Naujiems žaidimams naudojamas serverio patvirtintas rezultatas.
+    score: game.score?.total ?? getScoreBreakdown(game.answers, remainingTime(game.startedAt, game.finishedAt)).total,
   };
   write(RESULTS_KEY, [...results.filter((result) => result.date !== entry.date), entry]);
+}
+
+// Serverio istorija atnaujina atitinkamas dienas, išsaugant seną vietinę istoriją.
+export function saveServerResults(results) {
+  const dates = new Set(results.map(result => result.date));
+  write(RESULTS_KEY, [...getResults().filter(result => !dates.has(result.date)), ...results]);
 }
 
 export function getStatistics(results, now = Date.now()) {

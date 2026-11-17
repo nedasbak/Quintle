@@ -4,6 +4,7 @@ import AnswerSlots from './AnswerSlots.jsx';
 import { nextChallengeIn } from './challenges.js';
 import { getScoreBreakdown } from './scoring.js';
 import { createResultLink } from './resultLinks.js';
+import { POINTS_PER_ANSWER } from '../../../../shared/gameRules.mjs';
 
 export default function Results({ game, remaining, now, shared = false }) {
   const [showAnswers, setShowAnswers] = useState(!shared);
@@ -11,7 +12,9 @@ export default function Results({ game, remaining, now, shared = false }) {
   const [shareFallback, setShareFallback] = useState('');
   const ref = useRef(null);
   const { answers, challenge } = game;
-  const score = getScoreBreakdown(answers, remaining);
+  // Bendras rezultatas imamas iš serverio, retumas lieka atskira peržiūra.
+  const preview = getScoreBreakdown(answers, remaining);
+  const score = game.score ?? preview;
   const elapsed = ((game.finishedAt - game.startedAt) / 1000).toFixed(1);
   const resultLink = createResultLink(game);
 
@@ -19,7 +22,7 @@ export default function Results({ game, remaining, now, shared = false }) {
 
   async function shareResult() {
     const blocks = Array.from({ length: 5 }, (_, index) => index < answers.length ? '🟩' : '⬛').join('');
-    const text = `Quintle #${String(challenge.number).padStart(3, '0')} · ${challenge.date}\n${blocks}\n${answers.length}/5 · ${score.total} points\nFive answers. Thirty seconds.\nSample rarity scoring\n${resultLink}`;
+    const text = `Quintle #${String(challenge.number).padStart(3, '0')} · ${challenge.date}\n${blocks}\n${answers.length}/5 · ${score.total} points\nFive answers. Thirty seconds.\n${resultLink}`;
     try {
       await navigator.clipboard.writeText(text);
       setShareStatus('Copied to clipboard!');
@@ -39,17 +42,17 @@ export default function Results({ game, remaining, now, shared = false }) {
       </div>
 
       <div className="score-breakdown" aria-label="Score breakdown">
-        <div aria-label="Correctness points"><span>Correctness</span><strong>{score.correctness}</strong><small>{answers.length} × 100 points</small></div>
+        <div aria-label="Correctness points"><span>Correctness</span><strong>{score.correctness}</strong><small>{answers.length} × {POINTS_PER_ANSWER} points</small></div>
         <div aria-label="Speed bonus"><span>Speed</span><strong>+{score.speed}</strong><small>{(remaining / 1000).toFixed(1)}s remaining</small></div>
-        <div aria-label="Rarity bonus"><span>Rarity</span><strong>+{score.rarity}</strong><small>Uncommon answers</small></div>
+        <div aria-label="Rarity preview"><span>Rarity preview</span><strong>+{preview.rarity}</strong><small>Not added to score</small></div>
       </div>
 
       {shared && <button type="button" className="text-button" aria-expanded={showAnswers} aria-controls="result-answers" onClick={() => setShowAnswers(!showAnswers)}>{showAnswers ? 'Hide answers' : 'Show answers (spoilers)'}</button>}
       {showAnswers && <div id="result-answers">
-      <div className="results-list-heading"><h2>{shared ? 'Match answers' : 'Your answers'}</h2><span>Points + bonus</span></div>
+      <div className="results-list-heading"><h2>{shared ? 'Match answers' : 'Your answers'}</h2><span>Points · rarity preview</span></div>
       <AnswerSlots answers={answers} status="finished" challengeDate={challenge.date} />
       </div>}
-      <p className="rarity-disclaimer">Rarity uses sample pick rates for this preview, not live player data. Lower pick rates earn bigger bonuses.</p>
+      <p className="rarity-disclaimer">Rarity uses sample pick rates for this preview, not live player data. Preview values do not change your score.</p>
 
       <button type="button" className="primary-button share-button" onClick={shareResult}>
         {shareStatus === 'Copied to clipboard!' ? <Check size={17} /> : <Share2 size={17} />}

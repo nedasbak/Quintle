@@ -4,7 +4,7 @@ import Dialog from './components/Dialog.jsx';
 import AnswerSlots from './features/game/AnswerSlots.jsx';
 import Countdown from './features/game/Countdown.jsx';
 import Results from './features/game/Results.jsx';
-import { getScoreBreakdown } from './features/game/scoring.js';
+import { MAX_ANSWER_LENGTH, POINTS_PER_ANSWER, POINTS_PER_SECOND } from '../../shared/gameRules.mjs';
 import { getResults, getStatistics } from './features/game/storage.js';
 import useGame from './features/game/useGame.js';
 import SharedResults from './features/game/SharedResults.jsx';
@@ -22,29 +22,39 @@ export default function App() {
 }
 
 function GameApp() {
-  const { game, now, remaining, feedback, start, submit } = useGame();
+  const { game, now, remaining, feedback, pending, error, refresh, start, submit } = useGame();
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);
   const inputRef = useRef(null);
-  const { challenge, status, answers } = game;
+  const { challenge, status, answers } = game ?? { challenge: null, status: 'loading', answers: [] };
   const playing = status === 'playing';
   const finished = status === 'finished';
   const statistics = useMemo(() => getStatistics(getResults()), [game]);
-  const liveScore = getScoreBreakdown(answers).total;
-  const prompt = 'Name 5 ' + challenge.title.charAt(0).toLowerCase() + challenge.title.slice(1);
+  // Sąsaja rodo serverio patvirtintus taškus ir užduoties tekstą.
+  const liveScore = game?.score.correctness ?? 0;
+  const prompt = challenge?.prompt;
 
   useEffect(() => {
-    if (playing) inputRef.current?.focus();
-  }, [playing]);
+    if (playing && !pending) inputRef.current?.focus();
+  }, [playing, pending]);
 
-  useEffect(() => { setAnswer(''); }, [challenge.date]);
+  useEffect(() => { setAnswer(''); }, [challenge?.date]);
 
-  function onSubmit(event) {
+  async function onSubmit(event) {
     event.preventDefault();
-    if (submit(answer)) setAnswer('');
+    if (await submit(answer)) setAnswer('');
     else inputRef.current?.select();
     inputRef.current?.focus();
   }
+
+  // Kol serveris neatsakė, nepradedamas vietinis ar nepatvirtintas žaidimas.
+  if (!game) return (
+    <div className="site-shell"><main className="results-screen">
+      <h1>quintle</h1>
+      <p className="rarity-disclaimer" role={error ? 'alert' : 'status'}>{error || 'Loading today’s challenge…'}</p>
+      {error && <button type="button" className="primary-button" disabled={pending} onClick={refresh}>Try again</button>}
+    </main></div>
+  );
 
   return (
     <div className={'site-shell ' + (playing ? 'is-playing' : '')}>
@@ -82,22 +92,23 @@ function GameApp() {
                 <input ref={inputRef} id="answer-input" name="answer" value={answer}
                   onChange={(event) => setAnswer(event.target.value)}
                   placeholder={playing ? 'Type your next answer…' : 'Press Start when you’re ready…'}
-                  disabled={!playing} autoComplete="off" autoCapitalize="words" spellCheck={false}
-                  maxLength={80} enterKeyHint="send" aria-describedby="answer-feedback"
+                  disabled={!playing || pending} autoComplete="off" autoCapitalize="words" spellCheck={false}
+                  maxLength={MAX_ANSWER_LENGTH} enterKeyHint="send" aria-describedby="answer-feedback"
                   aria-invalid={playing && feedback.kind === 'error'} />
                 {playing ? (
-                  <button type="submit" className="submit-button" disabled={!answer.trim()} aria-label="Submit answer"><ArrowUp size={20} /></button>
+                  <button type="submit" className="submit-button" disabled={pending || !answer.trim()} aria-label="Submit answer"><ArrowUp size={20} /></button>
                 ) : (
-                  <button type="button" className="primary-button start-button" aria-label="Start challenge" onClick={start}>Start<ArrowUp size={18} /></button>
+                  <button type="button" className="primary-button start-button" disabled={pending} aria-label="Start challenge" onClick={start}>Start<ArrowUp size={18} /></button>
                 )}
               </form>
               <div className="game-scoreline">
                 <span>{answers.length} of 5 answers</span>
                 <output className="live-score" aria-label="Live score" aria-live="polite">{liveScore.toLocaleString('en-US')} pts</output>
               </div>
-              <p id="answer-feedback" className={'answer-feedback ' + (playing ? 'feedback-' + feedback.kind : '')} role="status" aria-live="polite">
-                {playing ? feedback.text : 'Five answers. Thirty seconds. Your time starts with Start.'}
+              <p id="answer-feedback" className={'answer-feedback ' + (error ? 'feedback-error' : playing ? 'feedback-' + feedback.kind : '')} role="status" aria-live="polite">
+                {error || (playing ? feedback.text : 'Five answers. Thirty seconds. Your time starts with Start.')}
               </p>
+              {error && <button type="button" className="text-button" disabled={pending} onClick={refresh}>Reconnect</button>}
             </div>
           </section>
         )}
@@ -113,11 +124,11 @@ function GameApp() {
         <ol className="how-to-list">
           <li><strong>Start the clock</strong><p>Read the category, then press Start. The 30-second timer keeps running if you leave or refresh.</p></li>
           <li><strong>Find your five</strong><p>Type one answer at a time and press Enter or the arrow. Invalid answers and duplicates won’t use a slot.</p></li>
-          <li><strong>Think differently</strong><p>Earn 100 points per accepted answer and 10 per second left at the end. Less common answers earn an extra bonus.</p></li>
+          <li><strong>Think differently</strong><p>Earn {POINTS_PER_ANSWER} points per accepted answer and {POINTS_PER_SECOND} per second left at the end. The server confirms your score.</p></li>
         </ol>
         <div className="rarity-explanation">
           <h3>Rarity preview</h3>
-          <p>Pick rates are sample values for this preview. Answers with a pick rate of 11–25% earn +25 points. At 10% or less, they earn +50.</p>
+          <p>Pick rates and rarity values are samples for this preview. They do not change your score.</p>
         </div>
         <button type="button" className="primary-button" onClick={() => setDialog(null)}>Got it</button>
       </Dialog>
