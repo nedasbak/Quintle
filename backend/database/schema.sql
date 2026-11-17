@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS game_sessions (
     session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    challenge_id BIGINT UNSIGNED NOT NULL,
     challenge_date DATE NOT NULL,
     started_at_utc DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
     expires_at DATETIME(3) GENERATED ALWAYS AS (started_at_utc + INTERVAL 30 SECOND) STORED,
@@ -79,11 +80,15 @@ CREATE TABLE IF NOT EXISTS game_sessions (
         FLOOR(100 * correct_count + 10 * remaining_seconds)
     ) STORED,
     UNIQUE KEY uq_session_player_day (player_id, challenge_date),
+    UNIQUE KEY uq_session_player_challenge (player_id, challenge_id),
     UNIQUE KEY uq_session_id_day (session_id, challenge_date),
     KEY ix_session_daily_score (challenge_date, score DESC),
+    KEY ix_session_challenge_score (challenge_id, score DESC),
     CONSTRAINT fk_session_player FOREIGN KEY (player_id) REFERENCES players (id),
     CONSTRAINT fk_session_challenge FOREIGN KEY (challenge_date)
         REFERENCES daily_challenges (challenge_date),
+    CONSTRAINT fk_session_challenge_id FOREIGN KEY (challenge_id, challenge_date)
+        REFERENCES daily_challenges (id, challenge_date),
     CONSTRAINT ck_session_start_day CHECK (DATE(started_at_utc) = challenge_date),
     CONSTRAINT ck_session_state CHECK (
         (status = 'in_progress' AND finished_at_utc IS NULL AND correct_count < 5)

@@ -77,6 +77,8 @@ their submission references to random UUIDs while preserving answers, scores, an
 Then apply `backend/database/migrations/008_session_details.sql` for deadlines, millisecond
 time remaining, creation timestamps, and submission counts. Counts include correct, incorrect,
 and duplicate guesses. Deadlines and completion time remain derived from server timestamps.
+Apply `backend/database/migrations/009_session_challenges.sql` next to link existing sessions
+to challenge IDs, enforce one attempt per player and challenge, and index scores by challenge.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
 Session field names/settings and submission details remain to be updated.
 

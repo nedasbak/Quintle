@@ -5,6 +5,7 @@ import { calculateScore, GAME_DURATION, MAX_ANSWERS, remainingTime } from '../..
 
 interface Session extends RowDataPacket {
   session_id: string;
+  challenge_id: number;
   challenge_date: string;
   started_at_utc: Date;
   expires_at: Date;
@@ -72,8 +73,8 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       if (action === 'start' && !session) {
         const sessionId = randomUUID();
         await connection.execute(
-          'INSERT INTO game_sessions (session_id, player_id, challenge_date, started_at_utc, created_at) VALUES (?, ?, ?, ?, ?)',
-          [sessionId, player.player_id, today, new Date(now), new Date(now)],
+          'INSERT INTO game_sessions (session_id, player_id, challenge_id, challenge_date, started_at_utc, created_at) SELECT ?, ?, id, challenge_date, ?, ? FROM daily_challenges WHERE challenge_date = ?',
+          [sessionId, player.player_id, new Date(now), new Date(now), today],
         );
         const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [sessionId]);
         session = started;
