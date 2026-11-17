@@ -91,14 +91,14 @@ function GameApp() {
                 <label htmlFor="answer-input" className="sr-only">Your answer</label>
                 <input ref={inputRef} id="answer-input" name="answer" value={answer}
                   onChange={(event) => setAnswer(event.target.value)}
-                  placeholder={playing ? 'Type your next answer…' : 'Press Start when you’re ready…'}
+                  placeholder={playing ? 'Type your next answer…' : status === 'unavailable' ? 'Challenge unavailable' : 'Press Start when you’re ready…'}
                   disabled={!playing || pending} autoComplete="off" autoCapitalize="words" spellCheck={false}
                   maxLength={MAX_ANSWER_LENGTH} enterKeyHint="send" aria-describedby="answer-feedback"
                   aria-invalid={playing && feedback.kind === 'error'} />
                 {playing ? (
                   <button type="submit" className="submit-button" disabled={pending || !answer.trim()} aria-label="Submit answer"><ArrowUp size={20} /></button>
                 ) : (
-                  <button type="button" className="primary-button start-button" disabled={pending} aria-label="Start challenge" onClick={start}>Start<ArrowUp size={18} /></button>
+                  <button type="button" className="primary-button start-button" disabled={pending || status !== 'ready'} aria-label="Start challenge" onClick={start}>Start<ArrowUp size={18} /></button>
                 )}
               </form>
               <div className="game-scoreline">
@@ -106,8 +106,9 @@ function GameApp() {
                 <output className="live-score" aria-label="Live score" aria-live="polite">{liveScore.toLocaleString('en-US')} pts</output>
               </div>
               <p id="answer-feedback" className={'answer-feedback ' + (error ? 'feedback-error' : playing ? 'feedback-' + feedback.kind : '')} role="status" aria-live="polite">
-                {error || (playing ? feedback.text : 'Five answers. Thirty seconds. Your time starts with Start.')}
+                {error || (playing || status === 'unavailable' ? feedback.text : 'Five answers. Thirty seconds. Your time starts with Start.')}
               </p>
+              {status === 'unavailable' && <button type="button" className="text-button" disabled={pending} onClick={refresh}>Check again</button>}
               {error && <button type="button" className="text-button" disabled={pending} onClick={refresh}>Reconnect</button>}
             </div>
           </section>

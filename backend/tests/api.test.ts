@@ -619,4 +619,46 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.ok(changed.updated_at.getTime() > Date.parse('2000-01-01T00:00:00Z'));
     await pool.execute('UPDATE daily_challenges SET time_limit = 30 WHERE challenge_date = ?', [date]);
   });
+  it('enforces challenge availability without consuming attempts or interrupting existing games', async () => {
+    const waiting = player(), started = player();
+    now = Date.parse(new Date().toISOString().slice(0, 10) + 'T12:00:00Z');
+    const challenge = getDailyChallenge(now);
+    await started.request('/start', {});
+    await waiting.request();
+    const [before] = await pool.query('SELECT * FROM daily_challenges ORDER BY id');
+    await pool.query(`CREATE OR REPLACE SQL SECURITY INVOKER VIEW current_challenge AS
+      SELECT challenge_date, category, prompt FROM daily_challenges WHERE challenge_date = UTC_DATE()`);
+    await pool.query(await readFile(new URL('../database/migrations/018_challenge_availability.sql', import.meta.url), 'utf8'));
+    assert.deepEqual((await pool.query('SELECT * FROM daily_challenges ORDER BY id'))[0], before);
+    try {
+      for (const settings of [[0, 30, 5], [1, 45, 5], [1, 30, 4]]) {
+        await pool.execute('UPDATE daily_challenges SET is_active = ?, time_limit = ?, required_answers = ? WHERE challenge_date = ?', [...settings, challenge.date]);
+        for (const request of [() => waiting.request(), () => waiting.request('/start', {}),
+          () => answer(waiting, challenge.answers[0][0])]) {
+          const reply = await request();
+          assert.equal(reply.status, 200);
+          assert.equal(reply.data.game.status, 'unavailable');
+          assert.equal(reply.data.game.startedAt, null);
+          assert.equal(reply.data.accepted, false);
+          assert.deepEqual(reply.data.results, []);
+        }
+        assert.deepEqual((await pool.query('SELECT * FROM current_challenge'))[0], []);
+        if (!settings[0]) {
+          now += 5049;
+          for (const variants of challenge.answers.slice(0, 5)) assert.equal((await answer(started, variants[0])).data.accepted, true);
+        }
+        const finished = (await started.request()).data.game;
+        assert.equal(finished.status, 'finished');
+        assert.equal(finished.score.total, 749);
+      }
+      const [[count]] = await pool.execute<RowDataPacket[]>(`SELECT COUNT(*) AS attempts FROM game_sessions g
+        JOIN players p ON p.id = g.player_id WHERE p.token_hash = ?`, [waiting.hash]);
+      assert.equal(count.attempts, 0);
+    } finally {
+      await pool.execute('UPDATE daily_challenges SET is_active = 1, time_limit = 30, required_answers = 5 WHERE challenge_date = ?', [challenge.date]);
+    }
+    assert.equal(((await pool.query('SELECT * FROM current_challenge'))[0] as RowDataPacket[]).length, 1);
+    assert.equal((await waiting.request()).data.game.status, 'ready');
+    assert.equal((await waiting.request('/start', {})).data.game.status, 'playing');
+  });
 });

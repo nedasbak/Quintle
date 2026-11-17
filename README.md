@@ -29,8 +29,8 @@ their scores using the original timestamps.
 
 Existing databases also need `backend/database/migrations/002_challenge_metadata.sql`
 once to add challenge settings and timestamps. Fresh imports already include these fields.
-These settings are stored metadata for now: gameplay still uses 30 seconds and five answers,
-and the API does not yet use `is_active` to control availability.
+The MVP supports 30 seconds and five answers. Disabled challenges or different settings block
+new attempts. Existing attempts keep their original timer and results and can still be finished.
 
 Set the connection URL in your shell (replace the placeholders with your database settings;
 URL-encode special characters in the username/password):
@@ -97,8 +97,9 @@ Apply `backend/database/migrations/016_session_timestamps.sql` next to rename th
 timestamps to `started_at` and `finished_at`. Values remain UTC with millisecond precision.
 Then apply `backend/database/migrations/017_session_statuses.sql` to map session states to
 `active`, `completed`, and `expired`. Existing game timing, scores, and history are preserved.
+Apply `backend/database/migrations/018_challenge_availability.sql` next to update the daily
+challenge view. The API and UI also enforce availability and let players check again later.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
-Challenge availability settings remain to be updated.
 
 ## Scoring and tests
 

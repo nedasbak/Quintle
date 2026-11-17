@@ -10,7 +10,7 @@ async function request(path, signal, body) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'The game request failed. Please try again.');
-    if (!data.game || !['ready', 'playing', 'finished'].includes(data.game.status)
+    if (!data.game || !['ready', 'playing', 'finished', 'unavailable'].includes(data.game.status)
       || !Array.isArray(data.game.answers) || !Number.isFinite(data.game.score?.total)
       || !Number.isFinite(data.serverNow) || !Array.isArray(data.results)) {
       throw new Error('The game server returned an invalid response.');

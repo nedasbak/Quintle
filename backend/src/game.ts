@@ -59,9 +59,14 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         'SELECT * FROM game_sessions WHERE player_id = ? AND challenge_date = ? FOR UPDATE', [player.player_id, today],
       );
       let session = active ?? daily;
+      const date = session?.challenge_date ?? today;
+      const [[challenge]] = await connection.execute<RowDataPacket[]>(
+        'SELECT category, prompt, time_limit, required_answers, is_active FROM daily_challenges WHERE challenge_date = ? FOR SHARE', [date]);
+      const available = Boolean(challenge.is_active) && challenge.time_limit * 1000 === GAME_DURATION && challenge.required_answers === MAX_ANSWERS;
       let accepted = false;
       let activityAt: Date | null = null;
       let feedback = { kind: 'hint', text: 'You’ve got this. Enter your first answer.' };
+      if (!session && !available) feedback = { kind: 'hint', text: "Today's challenge is unavailable. Please check again later." };
 
       // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
       if (session?.status === 'active' && now >= session.expires_at.getTime()) {
@@ -70,7 +75,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         session.status = 'expired';
         feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
       }
-      if (action === 'start' && !session) {
+      if (action === 'start' && !session && available) {
         const sessionId = randomUUID();
         await connection.execute(
           'INSERT INTO game_sessions (id, player_id, challenge_id, challenge_date, started_at, created_at) SELECT ?, ?, id, challenge_date, ?, ? FROM daily_challenges WHERE challenge_date = ?',
@@ -114,8 +119,6 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         const [[updated]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE id = ?', [session.id]);
         session = updated;
       }
-      const date = session?.challenge_date ?? today;
-      const [[challenge]] = await connection.execute<RowDataPacket[]>('SELECT category, prompt FROM daily_challenges WHERE challenge_date = ?', [date]);
       const [answers] = session ? await connection.execute<RowDataPacket[]>(
         "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.result = 'correct' ORDER BY s.id", [session.id],
       ) : [[]];
@@ -141,7 +144,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const response = {
         game: {
           challenge: { date, number: getDailyChallenge(Date.parse(date)).number, category: challenge.category, prompt: challenge.prompt },
-          status: !session ? 'ready' : finished ? 'finished' : 'playing',
+          status: !session ? available ? 'ready' : 'unavailable' : finished ? 'finished' : 'playing',
           answers: answers.map(answer => answer.display_answer as string),
           startedAt: session?.started_at.getTime() ?? null,
           finishedAt: session?.finished_at?.getTime() ?? null,

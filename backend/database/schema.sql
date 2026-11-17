@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS player_submissions (
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW current_challenge AS
 SELECT challenge_date, category, prompt
 FROM daily_challenges
-WHERE challenge_date = UTC_DATE();
+WHERE challenge_date = UTC_DATE() AND is_active = TRUE AND time_limit = 30 AND required_answers = 5;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW player_scores AS
 SELECT id AS session_id, player_id, challenge_date, status, correct_answers AS correct_count,
        remaining_seconds, score, finished_at AS finished_at_utc
