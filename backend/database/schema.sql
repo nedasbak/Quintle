@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS players (
     UNIQUE KEY uq_player_token (token_hash)
 ) ENGINE = InnoDB;
 CREATE TABLE IF NOT EXISTS game_sessions (
-    session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     challenge_id BIGINT UNSIGNED NOT NULL,
     challenge_date DATE NOT NULL,
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     ) STORED,
     UNIQUE KEY uq_session_player_day (player_id, challenge_date),
     UNIQUE KEY uq_session_player_challenge (player_id, challenge_id),
-    UNIQUE KEY uq_session_id_day (session_id, challenge_date),
+    UNIQUE KEY uq_session_id_day (id, challenge_date),
     KEY ix_session_daily_score (challenge_date, score DESC),
     KEY ix_session_challenge_score (challenge_id, score DESC),
     CONSTRAINT fk_session_player FOREIGN KEY (player_id) REFERENCES players (id),
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS player_submissions (
     KEY ix_submission_received (session_id, submitted_at),
     KEY ix_submission_answer_result (answer_id, result),
     CONSTRAINT fk_submission_session FOREIGN KEY (session_id, challenge_date)
-        REFERENCES game_sessions (session_id, challenge_date),
+        REFERENCES game_sessions (id, challenge_date),
     CONSTRAINT fk_submission_answer FOREIGN KEY (challenge_date, answer_id)
         REFERENCES accepted_answers (challenge_date, id),
     CONSTRAINT ck_submission_answer CHECK (
@@ -133,7 +133,7 @@ SELECT challenge_date, category, prompt
 FROM daily_challenges
 WHERE challenge_date = UTC_DATE();
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW player_scores AS
-SELECT session_id, player_id, challenge_date, status, correct_count,
+SELECT id AS session_id, player_id, challenge_date, status, correct_count,
        remaining_seconds, score, finished_at_utc
 FROM game_sessions
 WHERE finished_at_utc IS NOT NULL;

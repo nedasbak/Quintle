@@ -4,7 +4,7 @@ import { getDailyChallenge, normalizeAnswer } from '../../shared/challenges.mjs'
 import { calculateScore, GAME_DURATION, MAX_ANSWERS, remainingTime } from '../../shared/gameRules.mjs';
 
 interface Session extends RowDataPacket {
-  session_id: string;
+  id: string;
   challenge_id: number;
   challenge_date: string;
   started_at_utc: Date;
@@ -52,7 +52,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       const today = getDailyChallenge(now).date;
       await ensureChallenge(connection, now);
       const [[active]] = await connection.execute<Session[]>(
-        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY started_at_utc DESC, session_id DESC LIMIT 1 FOR UPDATE",
+        "SELECT * FROM game_sessions WHERE player_id = ? AND status = 'in_progress' ORDER BY started_at_utc DESC, id DESC LIMIT 1 FOR UPDATE",
         [player.player_id],
       );
       const [[daily]] = active ? [[]] : await connection.execute<Session[]>(
@@ -65,18 +65,18 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
 
       // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
       if (session?.status === 'in_progress' && now >= session.expires_at.getTime()) {
-        await connection.execute("UPDATE game_sessions SET status = 'timed_out', finished_at_utc = ? WHERE session_id = ?",
-          [session.expires_at, session.session_id]);
+        await connection.execute("UPDATE game_sessions SET status = 'timed_out', finished_at_utc = ? WHERE id = ?",
+          [session.expires_at, session.id]);
         session.status = 'timed_out';
         feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
       }
       if (action === 'start' && !session) {
         const sessionId = randomUUID();
         await connection.execute(
-          'INSERT INTO game_sessions (session_id, player_id, challenge_id, challenge_date, started_at_utc, created_at) SELECT ?, ?, id, challenge_date, ?, ? FROM daily_challenges WHERE challenge_date = ?',
+          'INSERT INTO game_sessions (id, player_id, challenge_id, challenge_date, started_at_utc, created_at) SELECT ?, ?, id, challenge_date, ?, ? FROM daily_challenges WHERE challenge_date = ?',
           [sessionId, player.player_id, new Date(now), new Date(now), today],
         );
-        const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [sessionId]);
+        const [[started]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE id = ?', [sessionId]);
         session = started;
         activityAt = new Date(now);
       } else if (action === 'answer' && session && session.status !== 'solved') {
@@ -87,21 +87,21 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
           [session.challenge_date, normalized],
         );
         const [[duplicate]] = answer ? await connection.execute<RowDataPacket[]>(
-          "SELECT id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND result = 'correct'", [session.session_id, answer.answer_id],
+          "SELECT id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND result = 'correct'", [session.id, answer.answer_id],
         ) : [[]];
         const result = expired ? 'expired' : !answer ? 'incorrect' : duplicate ? 'duplicate' : 'correct';
         await connection.execute(
           'INSERT INTO player_submissions (session_id, challenge_date, submitted_at, submitted_text, normalized_text, response_time_ms, result, answer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [session.session_id, session.challenge_date, new Date(now), input, normalized,
+          [session.id, session.challenge_date, new Date(now), input, normalized,
             Math.max(0, now - session.started_at_utc.getTime()), result, answer?.answer_id ?? null],
         );
         accepted = result === 'correct';
-        await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE session_id = ?', [session.session_id]);
+        await connection.execute('UPDATE game_sessions SET total_submissions = total_submissions + 1 WHERE id = ?', [session.id]);
         activityAt = new Date(now);
         if (accepted) {
           const count = session.correct_count + 1;
-          await connection.execute('UPDATE game_sessions SET correct_count = ?, status = ?, finished_at_utc = ? WHERE session_id = ?',
-            [count, count === MAX_ANSWERS ? 'solved' : 'in_progress', count === MAX_ANSWERS ? new Date(now) : null, session.session_id]);
+          await connection.execute('UPDATE game_sessions SET correct_count = ?, status = ?, finished_at_utc = ? WHERE id = ?',
+            [count, count === MAX_ANSWERS ? 'solved' : 'in_progress', count === MAX_ANSWERS ? new Date(now) : null, session.id]);
           feedback = { kind: 'success', text: count === MAX_ANSWERS ? 'Five for five. Beautifully done.' : `${answer!.display_answer} is in. Keep going!` };
         } else {
           feedback = { kind: 'error', text: expired ? 'Time is up. That answer arrived too late.'
@@ -111,13 +111,13 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
 
       // Rezultatas ir atsakymų sąrašas skaitomi iš tos pačios patvirtintos serverio būsenos.
       if (session) {
-        const [[updated]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE session_id = ?', [session.session_id]);
+        const [[updated]] = await connection.execute<Session[]>('SELECT * FROM game_sessions WHERE id = ?', [session.id]);
         session = updated;
       }
       const date = session?.challenge_date ?? today;
       const [[challenge]] = await connection.execute<RowDataPacket[]>('SELECT category, prompt FROM daily_challenges WHERE challenge_date = ?', [date]);
       const [answers] = session ? await connection.execute<RowDataPacket[]>(
-        "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.result = 'correct' ORDER BY s.id", [session.session_id],
+        "SELECT a.answer AS display_answer FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id WHERE s.session_id = ? AND s.result = 'correct' ORDER BY s.id", [session.id],
       ) : [[]];
       const finished = !!session?.finished_at_utc;
       const remaining = session ? remainingTime(session.started_at_utc.getTime(), session.finished_at_utc?.getTime() ?? now) : GAME_DURATION;

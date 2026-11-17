@@ -89,6 +89,8 @@ to `submitted_text` and `submitted_at_utc` to `submitted_at`. Timestamps remain 
 existing input, IDs, scores, and submission indexes are preserved.
 Then apply `backend/database/migrations/013_submission_identity_fields.sql` to rename
 `submission_id` to `id` and `outcome` to `result`, preserving credits and rarity statistics.
+Apply `backend/database/migrations/014_session_identity_field.sql` next to rename the session
+primary key to `id`. Existing UUIDs, submission references, and score-view output stay the same.
 Fresh imports of `schema.sql` already include these migrations; do not apply them again.
 Session field names/statuses and challenge availability settings remain to be updated.
 
