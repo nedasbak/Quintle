@@ -1,5 +1,6 @@
 import { buildAnswerIndex, starterChallenges } from './challenges.mjs';
 import { MAX_ANSWERS } from './gameRules.mjs';
+import { practiceChallengePacks } from './practiceChallengePacks.mjs';
 
 // IDs stay stable independently of the daily rotation and catalog ordering.
 const catalog = [
@@ -38,6 +39,7 @@ const catalog = [
       ['Fright'], ['Slight'], ['Plight'], ['Spite'], ['Quite'], ['Sprite'], ['Blight'], ['Lite'], ['Smite'], ['Trite'],
     ],
   },
+  ...practiceChallengePacks,
 ].map(challenge => ({ ...challenge, prompt: `Name ${MAX_ANSWERS} ${challenge.title.charAt(0).toLowerCase()}${challenge.title.slice(1)}` }));
 
 for (const challenge of catalog) buildAnswerIndex(challenge.answers);

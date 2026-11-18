@@ -8,6 +8,7 @@ import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
 it('provides distinct themes and stable challenges with at least five valid answers', () => {
   const themes = getPracticeThemes();
   assert.equal(themes.length, 6);
+  for (const theme of themes) assert.ok(theme.challenges.length >= 5, `${theme.name} needs at least five challenges.`);
   assert.equal(new Set(themes.map(theme => theme.id)).size, themes.length);
   const choices = themes.flatMap(theme => theme.challenges);
   assert.equal(new Set(choices.map(choice => choice.id)).size, choices.length);
@@ -29,8 +30,18 @@ it('rejects unknown challenge IDs and isolates catalog data from caller mutation
   const challenge = getPracticeChallenge('dog-breeds')!;
   challenge.answers[0][0] = 'Changed';
   assert.equal(getPracticeChallenge('dog-breeds')!.answers[0][0], 'Labrador Retriever');
-  getPracticeThemes()[0].challenges.length = 0;
-  assert.equal(getPracticeThemes()[0].challenges.length, 2);
+  const themes = getPracticeThemes(), originalCount = themes[0].challenges.length;
+  themes[0].challenges.length = 0;
+  assert.equal(getPracticeThemes()[0].challenges.length, originalCount);
+});
+
+it('keeps new challenge boundaries and aliases consistent', () => {
+  const cats = getPracticeChallenge('panthera-cats')!;
+  assert.deepEqual(validateAnswer(cats, 'SNOW LEOPARDS', []), { answer: 'Snow leopard' });
+  assert.match(validateAnswer(cats, 'Cheetah', []).error!, /try another/i);
+  const units = getPracticeChallenge('si-base-units')!;
+  assert.deepEqual(validateAnswer(units, 'meters', []), { answer: 'Metre' });
+  assert.match(validateAnswer(units, 'meter', ['Metre']).error!, /already/i);
 });
 
 it('serves theme metadata without answers, player cookies, or a game request', async () => {
