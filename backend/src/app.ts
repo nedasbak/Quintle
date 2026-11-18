@@ -22,23 +22,63 @@ export function createApp(play: ReturnType<typeof createGameService>) {
   app.use('/api', (_request, response, next) => {
     response.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     next();
-  }, rateLimit({ windowMs: 60_000, limit: 180, standardHeaders: 'draft-8', legacyHeaders: false,
-    message: { error: 'Too many requests. Please try again shortly.' } }));
+  }, rateLimit({
+    windowMs: 60_000, limit: 180, standardHeaders: 'draft-8', legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again shortly.' }
+  }));
   app.use(express.json({ limit: '2kb' }));
 
   // Priimami tik reikalingi laukai ir tos pačios svetainės JSON užklausos.
+
+  // Validate browser origins for POST requests.
   app.use('/api', (request, response, next) => {
     if (request.method !== 'POST') return next();
+
     const origin = request.get('origin');
+
     if (origin) {
       try {
-        if (new URL(origin).host !== request.get('host')) return response.status(403).json({ error: 'Request origin is not allowed.' });
-      } catch { return response.status(403).json({ error: 'Invalid request origin.' }); }
+        const parsedOrigin = new URL(origin);
+        const allowedOrigins = new Set([
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+        ]);
+
+        if (
+          process.env.NODE_ENV === 'production'
+            ? parsedOrigin.origin !== process.env.APP_ORIGIN
+            : !allowedOrigins.has(parsedOrigin.origin)
+        ) {
+          return response.status(403).json({
+            error: 'Request origin is not allowed.',
+          });
+        }
+      } catch {
+        return response.status(403).json({
+          error: 'Invalid request origin.',
+        });
+      }
     }
-    if (!request.is('application/json')) return response.status(415).json({ error: 'Send a JSON request.' });
-    if (!request.body || Array.isArray(request.body) || typeof request.body !== 'object') return response.status(400).json({ error: 'Invalid request body.' });
+
+    if (!request.is('application/json')) {
+      return response.status(415).json({
+        error: 'Send a JSON request.',
+      });
+    }
+
+    if (
+      !request.body ||
+      Array.isArray(request.body) ||
+      typeof request.body !== 'object'
+    ) {
+      return response.status(400).json({
+        error: 'Invalid request body.',
+      });
+    }
+
     next();
   });
+
   app.get('/api/game', async (request, response) => response.json(await play(playerHash(request, response), 'read')));
   app.post('/api/game/start', async (request, response) => {
     if (Object.keys(request.body).length) return response.status(400).json({ error: 'Start does not accept game data.' });
@@ -58,7 +98,7 @@ export function createApp(play: ReturnType<typeof createGameService>) {
   const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
     if (error.type === 'entity.parse.failed') return response.status(400).json({ error: 'Invalid JSON.' });
     if (error.type === 'entity.too.large') return response.status(413).json({ error: 'Request is too large.' });
-    console.error('Game API failed:', error.code ?? error.name);
+    console.error('Game API failed:', error ?? error.name);
     response.status(503).json({ error: 'Game server is unavailable. Please try again.' });
   };
   app.use(handleError);
