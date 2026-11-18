@@ -8,8 +8,16 @@ export function mountFrontend(app: Express, directory: string) {
     app.use(express.static(directory));
     app.get('/', (_request, response) => response.sendFile('index.html', { root: directory }));
   } else {
-    app.get('/', (_request, response) => response.json({
-      service: 'Quintle API', message: 'Open the frontend app to play.', api: '/api/game',
-    }));
+    app.get('/', (request, response) => {
+      const host = request.get('host');
+      if (!host || !/^(?:\[[a-f\d:]+\]|[a-z\d.-]+)(?::\d+)?$/i.test(host)) return response.status(400).send('Invalid host header.');
+      let target: URL;
+      try { target = new URL(`${request.protocol}://${host}`); }
+      catch { return response.status(400).send('Invalid host header.'); }
+      const origin = target.origin;
+      target.port = '5173';
+      if (target.origin === origin) return response.status(503).send('Frontend build is missing. Start the frontend on a separate port.');
+      response.redirect(302, target.href);
+    });
   }
 }

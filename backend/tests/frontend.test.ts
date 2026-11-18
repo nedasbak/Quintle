@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { it } from 'node:test';
@@ -8,7 +9,7 @@ import { createApp } from '../src/app.ts';
 import { mountFrontend } from '../src/frontend.ts';
 
 for (const built of [false, true]) {
-  it(built ? 'serves the built frontend and its assets alongside the API' : 'returns API status when no frontend build exists', async () => {
+  it(built ? 'serves the built frontend and its assets alongside the API' : 'redirects to the frontend when no build exists', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'quintle-frontend-'));
     const html = '<!doctype html><title>Quintle</title>';
     if (built) {
@@ -23,18 +24,29 @@ for (const built of [false, true]) {
       const address = server.address();
       assert.ok(address && typeof address === 'object');
       const base = `http://127.0.0.1:${address.port}`;
-      const response = await fetch(base + '/');
-      assert.equal(response.status, 200);
+      const withHost = (host: string) => new Promise<IncomingMessage>((resolve, reject) => {
+        const request = httpRequest(base, { headers: { Host: host } }, response => { response.resume(); resolve(response); });
+        request.on('error', reject);
+        request.end();
+      });
+      const response = await fetch(base + '/', { redirect: 'manual' });
       if (built) {
+        assert.equal(response.status, 200);
         assert.match(response.headers.get('content-type')!, /text\/html/);
         assert.equal(await response.text(), html);
         const asset = await fetch(base + '/asset.txt');
         assert.equal(asset.status, 200);
         assert.equal(await asset.text(), 'Quintle asset');
       } else {
-        assert.deepEqual(await response.json(), {
-          service: 'Quintle API', message: 'Open the frontend app to play.', api: '/api/game',
-        });
+        assert.equal(response.status, 302);
+        assert.equal(response.headers.get('location'), 'http://127.0.0.1:5173/');
+        const local = await withHost(`localhost:${address.port}`);
+        assert.equal(local.headers.location, 'http://localhost:5173/');
+        const loop = await withHost('127.0.0.1:5173');
+        assert.equal(loop.statusCode, 503);
+        assert.equal(loop.headers.location, undefined);
+        const invalid = await withHost('user@other.example');
+        assert.equal(invalid.statusCode, 400);
       }
       const themes = await fetch(base + '/api/game/themes');
       assert.equal(themes.status, 200);
