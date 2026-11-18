@@ -25,6 +25,7 @@ export default function useGame() {
       if (controller.signal.aborted) return false;
       gameRef.current = response.game;
       clockRef.current = { server: response.serverNow, local: performance.now() };
+      nextRefreshRef.current = 0;
       setNow(response.serverNow);
       if (response.game.mode !== 'practice') saveServerResults(response.results);
       savePracticeId(response.game.mode === 'practice' ? response.game.id : null);

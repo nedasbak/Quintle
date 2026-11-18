@@ -4,7 +4,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { after, before, describe, it } from 'node:test';
+import { after, afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import { createPool } from 'mysql2/promise';
@@ -30,18 +30,19 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
   let base: string;
   const play = createGameService(pool, () => now);
 
-  before(async () => {
+  // Each test gets its own HTTP rate-limit window while retaining migration fixtures.
+  beforeEach(async () => {
     server = createApp(play, createPracticeService(pool, () => now)).listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing HTTP test address.');
     base = `http://127.0.0.1:${address.port}`;
   });
-  after(async () => {
+  afterEach(async () => {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await pool.end();
   });
+  after(async () => { await pool.end(); });
 
   function player() {
     now = Date.parse('2026-11-17T12:00:00Z');
@@ -271,6 +272,101 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(next.data.game.challenge.date, '2026-11-18');
     assert.equal(next.data.game.status, 'ready');
     assert.equal(next.data.results[0].score, 700);
+  });
+  it('starts today on the first click after an unattended attempt expires across midnight', async () => {
+    const client = player();
+    now = Date.parse('2026-11-17T23:59:55Z');
+    const previous = (await client.request('/start', {})).data.game;
+    await answer(client, 'Mexico');
+    now = previous.startedAt + GAME_DURATION;
+    const next = await client.request('/start', {});
+    assert.equal(next.status, 200);
+    assert.equal(next.data.game.challenge.date, '2026-11-18');
+    assert.equal(next.data.game.status, 'playing');
+    assert.equal(next.data.game.startedAt, now);
+    assert.deepEqual(next.data.game.answers, []);
+    assert.deepEqual(next.data.results, [{ date: '2026-11-17', correct: 1, score: 100 }]);
+    const [rows] = await pool.execute<RowDataPacket[]>(`SELECT g.challenge_date, g.status, g.finished_at FROM game_sessions g
+      JOIN players p ON p.id = g.player_id WHERE p.token_hash = ? ORDER BY g.challenge_date`, [client.hash]);
+    assert.deepEqual(rows.map(row => [row.challenge_date, row.status]), [['2026-11-17', 'expired'], ['2026-11-18', 'active']]);
+    assert.equal(rows[0].finished_at.getTime(), previous.startedAt + GAME_DURATION);
+    const startedAt = now;
+    now += 1234;
+    assert.equal((await client.request('/start', {})).data.game.startedAt, startedAt);
+  });
+  it('keeps a live midnight attempt on repeated starts and rejects late answers for its original day', async () => {
+    const client = player();
+    now = Date.parse('2026-11-17T23:59:55Z');
+    const previous = (await client.request('/start', {})).data.game;
+    now += 10_000;
+    const resumed = await client.request('/start', {});
+    assert.deepEqual(resumed.data.game, previous);
+    now = previous.startedAt + GAME_DURATION;
+    const late = await answer(client, 'Mexico');
+    assert.equal(late.data.accepted, false);
+    assert.equal(late.data.game.challenge.date, '2026-11-17');
+    assert.equal(late.data.game.status, 'finished');
+    assert.equal(late.data.game.score.total, 0);
+    assert.equal((await client.request('/start', {})).data.game.challenge.date, '2026-11-18');
+  });
+  it('shares one daily challenge across concurrent players and preserves database content', async () => {
+    const clients = Array.from({ length: 4 }, player);
+    now = Date.parse('2026-12-24T23:59:59.999Z');
+    const replies = await Promise.all(clients.map(client => client.request()));
+    for (const reply of replies) {
+      assert.equal(reply.status, 200);
+      assert.equal(reply.data.game.status, 'ready');
+      assert.deepEqual(reply.data.game.challenge, replies[0].data.game.challenge);
+      assert.equal(Object.hasOwn(reply.data.game.challenge, 'answers'), false);
+    }
+    now += 1;
+    const next = await clients[0].request();
+    assert.equal(next.data.game.challenge.date, '2026-12-25');
+    assert.equal(next.data.game.challenge.number, replies[0].data.game.challenge.number + 1);
+    assert.notEqual(next.data.game.challenge.prompt, replies[0].data.game.challenge.prompt);
+    const [[original]] = await pool.execute<RowDataPacket[]>('SELECT * FROM daily_challenges WHERE challenge_date = ?', [next.data.game.challenge.date]);
+    const custom = { category: 'Curated category', prompt: 'A question maintained in the database' };
+    try {
+      await pool.execute('UPDATE daily_challenges SET category = ?, prompt = ? WHERE id = ?', [custom.category, custom.prompt, original.id]);
+      const updated = await Promise.all(clients.map(client => client.request()));
+      for (const reply of updated) {
+        assert.equal(reply.status, 200);
+        assert.deepEqual(reply.data.game.challenge, { ...next.data.game.challenge, ...custom });
+      }
+      const [[count]] = await pool.execute<RowDataPacket[]>('SELECT COUNT(*) AS total FROM daily_challenges WHERE challenge_date = ?', [next.data.game.challenge.date]);
+      assert.equal(count.total, 1);
+    } finally {
+      await pool.execute('UPDATE daily_challenges SET category = ?, prompt = ? WHERE id = ?', [original.category, original.prompt, original.id]);
+    }
+  });
+  it('does not start a daily challenge with fewer than the required reachable answers', async () => {
+    const client = player();
+    now = Date.parse('2027-01-01T12:00:00Z');
+    const [challenge] = await pool.execute<ResultSetHeader>(
+      'INSERT INTO daily_challenges (challenge_date, category, prompt) VALUES (?, ?, ?)',
+      [new Date(now).toISOString().slice(0, 10), 'Curated category', 'Name five curated answers']);
+    const [[source]] = await pool.query<RowDataPacket[]>(`SELECT challenge_id FROM accepted_answers
+      GROUP BY challenge_id HAVING COUNT(*) >= 5 ORDER BY challenge_id LIMIT 1`);
+    const [answers] = await pool.execute<RowDataPacket[]>(`SELECT answer FROM accepted_answers
+      WHERE challenge_id = ? ORDER BY id LIMIT 5`, [source.challenge_id]);
+    for (const { answer } of answers) {
+      await pool.execute('INSERT INTO accepted_answers (challenge_id, challenge_date, answer) VALUES (?, ?, ?)',
+        [challenge.insertId, new Date(now).toISOString().slice(0, 10), answer]);
+    }
+    // Multiple aliases for one answer cannot make an incomplete challenge playable.
+    const [keys] = await pool.execute<RowDataPacket[]>('SELECT id, challenge_date FROM accepted_answers WHERE challenge_id = ? ORDER BY id', [challenge.insertId]);
+    for (const key of ['first', 'second', 'third', 'fourth', 'fifth']) {
+      await pool.execute('INSERT INTO answer_keys (challenge_date, normalized_key, answer_id) VALUES (?, ?, ?)', [keys[0].challenge_date, key, keys[0].id]);
+    }
+    for (const path of ['', '/start']) {
+      const response = await client.request(path, path ? {} : undefined);
+      assert.equal(response.status, 200);
+      assert.equal(response.data.game.status, 'unavailable');
+      assert.equal(response.data.game.startedAt, null);
+    }
+    await pool.execute(`INSERT INTO answer_keys (challenge_date, normalized_key, answer_id)
+      SELECT challenge_date, LOWER(answer), id FROM accepted_answers WHERE challenge_id = ?`, [challenge.insertId]);
+    assert.equal((await client.request('/start', {})).data.game.status, 'playing');
   });
   it('keeps records when applying the precise-scoring migration', async () => {
     // Migracija turi tikti ir jau veikiančiai bazei, ne tik naujai schemai.

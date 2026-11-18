@@ -24,7 +24,10 @@ vi.mock('../src/features/game/api.js', async () => {
     };
   }
   return {
-    getGame: vi.fn(async () => response()),
+    getGame: vi.fn(async () => {
+      if (server.game && server.game.status !== 'playing' && server.game.challenge.date !== newGame().challenge.date) server.game = newGame();
+      return response();
+    }),
     startGame: vi.fn(async () => {
       server.game ??= newGame();
       if (server.game.status === 'ready') server.game = { ...server.game, status: 'playing', startedAt: Date.now() };
@@ -75,7 +78,7 @@ describe('server-connected game interface', () => {
     await advance(5000);
     expect(screen.getByRole('button', { name: 'Start challenge' })).toBeDisabled();
     expect(screen.getByRole('textbox', { name: /your answer/i })).toBeDisabled();
-    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.getByText(message)).toBeInTheDocument();
     await start();
     expect(api.startGame).not.toHaveBeenCalled();
@@ -85,12 +88,79 @@ describe('server-connected game interface', () => {
   });
   it('loads the challenge without starting the clock', async () => {
     await mount();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Name 5 countries beginning with M');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Ready to play?');
     expect(within(screen.getByRole('list', { name: 'Your five answers' })).getAllByRole('listitem')).toHaveLength(5);
     expect(screen.getByRole('textbox', { name: /your answer/i })).toBeDisabled();
     await advance(5000);
-    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(api.startGame).not.toHaveBeenCalled();
+  });
+  it('loads the new UTC challenge at midnight without starting an attempt', async () => {
+    vi.setSystemTime(new Date('2026-11-17T23:59:59Z'));
+    await mount();
+    expect(screen.getByText('Daily #001')).toBeInTheDocument();
+    await advance(1000);
+    expect(screen.getByText('Daily #002')).toBeInTheDocument();
+    expect(screen.getByText('Space')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start challenge' })).toBeEnabled();
+    expect(api.startGame).not.toHaveBeenCalled();
+    expect(api.getGame).toHaveBeenCalledTimes(2);
+  });
+  it('replaces yesterday’s completed result at UTC midnight and preserves its history', async () => {
+    vi.setSystemTime(new Date('2026-11-17T23:59:29Z'));
+    await mount();
+    await start();
+    await answer('Mexico');
+    await advance(30_000);
+    expect(screen.getByLabelText('Total score')).toHaveTextContent('100');
+    await advance(1000);
+    expect(screen.getByText('Daily #002')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start challenge' })).toBeEnabled();
+    expect(JSON.parse(localStorage.getItem('quintle:results:v1'))).toEqual([{ date: '2026-11-17', correct: 1, score: 100 }]);
+  });
+  it('keeps an active attempt across UTC midnight and unlocks today after its deadline', async () => {
+    vi.setSystemTime(new Date('2026-11-17T23:59:55Z'));
+    await mount();
+    await start();
+    await answer('Mexico');
+    await advance(10_000);
+    expect(screen.getByText('Daily #001')).toBeInTheDocument();
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '20 seconds remaining');
+    expect(api.getGame).toHaveBeenCalledTimes(1);
+    await advance(20_000);
+    expect(screen.getByLabelText('Total score')).toHaveTextContent('100');
+    await advance(1000);
+    expect(screen.getByText('Daily #002')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start challenge' })).toBeEnabled();
+  });
+  it('uses server time for midnight rotation when the browser clock is incorrect', async () => {
+    const { newGame } = await import('../src/features/game/storage.js');
+    const serverTime = Date.parse('2026-11-17T23:59:59Z');
+    vi.setSystemTime(new Date('2030-06-01T12:00:00Z'));
+    function payload(time) {
+      return { game: { ...newGame(time), score: { correctness: 0, speed: 0, total: 0 } },
+        serverNow: time, accepted: false, feedback: { kind: 'hint', text: '' }, results: [] };
+    }
+    vi.mocked(api.getGame).mockResolvedValueOnce(payload(serverTime)).mockResolvedValueOnce(payload(serverTime + 1000));
+    await mount();
+    expect(screen.getByText('Daily #001')).toBeInTheDocument();
+    await advance(1000);
+    expect(screen.getByText('Daily #002')).toBeInTheDocument();
+    expect(api.getGame).toHaveBeenCalledTimes(2);
+  });
+  it('retries a failed midnight refresh without repeated requests on every tick', async () => {
+    vi.setSystemTime(new Date('2026-11-17T23:59:59Z'));
+    await mount();
+    vi.mocked(api.getGame).mockRejectedValueOnce(new Error('Connection lost.'));
+    await advance(1000);
+    expect(screen.getByText('Connection lost.')).toBeInTheDocument();
+    expect(screen.getByText('Daily #001')).toBeInTheDocument();
+    await advance(4000);
+    expect(api.getGame).toHaveBeenCalledTimes(2);
+    await advance(1000);
+    expect(screen.getByText('Daily #002')).toBeInTheDocument();
+    expect(screen.queryByText('Connection lost.')).not.toBeInTheDocument();
+    expect(api.getGame).toHaveBeenCalledTimes(3);
   });
   it('focuses the input and shows server validation without duplicate points', async () => {
     await mount();
