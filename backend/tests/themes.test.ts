@@ -7,7 +7,7 @@ import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
 
 it('provides distinct themes and stable challenges with at least five valid answers', () => {
   const themes = getPracticeThemes();
-  assert.equal(themes.length, 11);
+  assert.equal(themes.length, 16);
   for (const theme of themes) assert.ok(theme.challenges.length >= 5, `${theme.name} needs at least five challenges.`);
   assert.equal(new Set(themes.map(theme => theme.id)).size, themes.length);
   const choices = themes.flatMap(theme => theme.challenges);
@@ -51,6 +51,11 @@ it('validates the new themes without conflating similar names or accepting out-o
     ['elements-starting-c', 'Cesium', 'Caesium', 'Oxygen'],
     ['nolan-films-before-2025', 'Prestige', 'The Prestige', 'Avatar'],
     ['minecraft-nether-biomes', 'Basalt Delta', 'Basalt Deltas', 'The End'],
+    ['pasta-types', 'Fettucine', 'Fettuccine', 'Paella'],
+    ['paris-2024-ball-sports', 'Soccer', 'Football', 'Badminton'],
+    ['rock-bands-before-1990', 'ACDC', 'AC/DC', 'Oasis'],
+    ['smartphone-brands', 'One Plus', 'OnePlus', 'Adidas'],
+    ['harry-potter-characters', 'Tom Riddle', 'Lord Voldemort', 'Gandalf'],
   ];
   for (const [id, alias, canonical, invalid] of cases) {
     const challenge = getPracticeChallenge(id)!;
