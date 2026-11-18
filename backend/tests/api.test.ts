@@ -801,4 +801,70 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.deepEqual(after.game, daily.game);
     assert.deepEqual(after.results, daily.results);
   });
+  it('validates practice answers, scores completion, and isolates replays and daily statistics', async () => {
+    const client = player(), stranger = player();
+    const daily = (await client.request()).data;
+    const start = await client.request('/practice/start', { challengeId: 'dog-breeds' });
+    const { id, startedAt } = start.data.game;
+    const path = `/practice/${id}/answers`;
+    const guess = (answer: string, sessionId = id) => client.request(`/practice/${sessionId}/answers`, { answer });
+    for (const body of [{}, { answer: ' ' }, { answer: 123 }, { answer: 'a'.repeat(81) },
+      { answer: '\uFDFA'.repeat(80) }, { answer: 'Lab', score: 800 }]) {
+      assert.equal((await client.request(path, body)).status, 400);
+    }
+    assert.equal((await client.request(path, { answer: 'Lab' }, { Origin: 'https://foreign.example' })).status, 403);
+    assert.equal((await stranger.request(path, { answer: 'Lab' })).status, 404);
+    assert.equal((await guess('Lab', randomUUID())).status, 404);
+    const wrong = await guess("Moon' OR 1=1 --");
+    assert.equal(wrong.data.accepted, false);
+    assert.deepEqual(wrong.data.game.answers, []);
+    const snapshot = getPracticeChallenge('dog-breeds')!.answers;
+    snapshot[0].push('old lab');
+    await pool.execute('UPDATE practice_sessions SET answer_keys = ? WHERE id = ?', [JSON.stringify(snapshot), id]);
+    const aliases = await Promise.all([guess('old lab'), guess('  LÁBRADOR  ')]);
+    assert.equal(aliases.filter(reply => reply.data.accepted).length, 1);
+    assert.ok(aliases.some(reply => /already/i.test(reply.data.feedback.text)));
+    assert.deepEqual(aliases[0].data.game.answers, ['Labrador Retriever']);
+    assert.deepEqual(aliases[0].data.game.score, { correctness: 100, speed: 0, total: 100 });
+    now += 5049;
+    let result = aliases[0].data;
+    for (const value of ['Golden Retriever', 'German Shepherd Dog', 'Beagle', 'Poodle']) {
+      const reply = await guess(value);
+      assert.equal(reply.status, 200);
+      assert.equal(reply.data.accepted, true);
+      result = reply.data;
+    }
+    assert.equal(result.game.status, 'finished');
+    assert.equal(result.game.finishedAt, startedAt + 5049);
+    assert.deepEqual(result.game.score, { correctness: 500, speed: 249, total: 749 });
+    const [[stored]] = await pool.execute<RowDataPacket[]>('SELECT answers, score, finished_at FROM practice_sessions WHERE id = ?', [id]);
+    assert.deepEqual(stored.answers, result.game.answers);
+    assert.equal(stored.score, 749);
+    assert.equal(stored.finished_at.getTime(), result.game.finishedAt);
+    const completed = await guess('Boxer');
+    assert.equal(completed.data.accepted, false);
+    assert.deepEqual(completed.data.game, result.game);
+    const replay = (await client.request('/practice/start', { challengeId: 'solar-system-planets' })).data.game;
+    assert.notEqual(replay.id, id);
+    assert.deepEqual(replay.answers, []);
+    assert.equal((await guess('Boxer')).data.accepted, false);
+    assert.deepEqual((await client.request(`/practice/${replay.id}`)).data.game, replay);
+    now = replay.startedAt + GAME_DURATION;
+    const late = await guess('Earth', replay.id);
+    assert.equal(late.data.accepted, false);
+    assert.equal(late.data.game.status, 'finished');
+    assert.equal(late.data.game.finishedAt, now);
+    assert.deepEqual(late.data.game.answers, []);
+    assert.equal(late.data.game.score.total, 0);
+    const third = (await client.request('/practice/start', { challengeId: 'countries-m' })).data.game;
+    assert.notEqual(third.id, replay.id);
+    assert.equal(third.status, 'playing');
+    assert.equal((await guess('Mars', replay.id)).data.accepted, false);
+    assert.deepEqual((await client.request(`/practice/${third.id}`)).data.game.answers, []);
+    const after = (await client.request()).data;
+    assert.deepEqual(after.game, daily.game);
+    assert.deepEqual(after.results, daily.results);
+    const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE token_hash = ?', [client.hash]);
+    assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
+  });
 });

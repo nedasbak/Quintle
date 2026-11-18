@@ -55,6 +55,16 @@ export function createApp(play: ReturnType<typeof createGameService>, practice?:
     const result = await practice(playerHash(request, response), 'read', request.params.sessionId as string);
     response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
   });
+  app.post('/api/game/practice/:sessionId/answers', async (request, response) => {
+    const { answer } = request.body;
+    if (Object.keys(request.body).some(key => key !== 'answer') || typeof answer !== 'string' || !answer.trim() || answer.length > MAX_ANSWER_LENGTH) {
+      return response.status(400).json({ error: `Send one answer of up to ${MAX_ANSWER_LENGTH} characters.` });
+    }
+    if ([...normalizeAnswer(answer)].length > 255) return response.status(400).json({ error: 'Answer is too long after normalization.' });
+    if (!practice) return response.status(503).json({ error: 'Practice is unavailable.' });
+    const result = await practice(playerHash(request, response), 'answer', request.params.sessionId as string, answer);
+    response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
+  });
   app.get('/api/game', async (request, response) => response.json(await play(playerHash(request, response), 'read')));
   app.post('/api/game/start', async (request, response) => {
     if (Object.keys(request.body).length) return response.status(400).json({ error: 'Start does not accept game data.' });
