@@ -254,7 +254,7 @@ export const practiceChallengePacks = [
     { id: 'jackson-five-members', title: 'Members of the Jackson 5 during their Motown years', answers: [
       ['Michael Jackson', 'Michael'], ['Jackie Jackson', 'Jackie', 'Sigmund Jackson'], ['Tito Jackson', 'Tito', 'Toriano Jackson'], ['Jermaine Jackson', 'Jermaine'], ['Marlon Jackson', 'Marlon'],
     ] },
-    { id: 'orchestral-woodwinds', title: 'Orchestral woodwind instruments', answers: [
+    { id: 'orchestral-woodwinds', title: 'Woodwind instruments, including historical types', answers: [
       ['Flute'], ['Piccolo'], ['Oboe'], ['Cor anglais', 'English horn'], ['Clarinet'], ['Bass clarinet'], ['Bassoon'], ['Contrabassoon', 'Double bassoon'], ['Saxophone', 'Sax'],
       ['Alto flute'], ['Bass flute'], ['E-flat clarinet', 'E flat clarinet', 'Eb clarinet'], ['Contrabass clarinet'], ["Oboe d'amore", 'Oboe damore'], ['Bass oboe'], ['Heckelphone'],
     ] },
@@ -299,7 +299,7 @@ export const practiceChallengePacks = [
       ['The Lion, the Witch and the Wardrobe', 'The Lion the Witch and the Wardrobe', 'Lion Witch and Wardrobe'], ['Prince Caspian'], ['The Voyage of the Dawn Treader', 'Voyage of the Dawn Treader'], ['The Silver Chair', 'Silver Chair'],
       ['The Horse and His Boy', 'Horse and His Boy'], ["The Magician's Nephew", 'The Magicians Nephew', 'Magicians Nephew', 'The Magician’s Nephew'], ['The Last Battle', 'Last Battle'],
     ] },
-    { id: 'jane-austen-novels', title: 'Completed novels by Jane Austen', answers: [
+    { id: 'jane-austen-novels', title: 'Completed novels and novellas by Jane Austen', answers: [
       ['Sense and Sensibility', 'Sense & Sensibility'], ['Pride and Prejudice', 'Pride & Prejudice'], ['Mansfield Park'], ['Emma'], ['Northanger Abbey'], ['Persuasion'],
     ] },
     { id: 'orwell-novels', title: 'Novels by George Orwell', answers: [

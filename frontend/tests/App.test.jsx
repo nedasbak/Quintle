@@ -94,6 +94,19 @@ describe('server-connected game interface', () => {
     await advance(5000);
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(api.startGame).not.toHaveBeenCalled();
+    await start();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Name 5 countries beginning with M');
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+  });
+  it('shows the corrected canonical answer and prevents another spelling from earning points', async () => {
+    await mount();
+    await start();
+    await answer('Madagscar');
+    expect(screen.getByRole('list', { name: 'Your five answers' })).toHaveTextContent('Madagascar');
+    expect(screen.getByLabelText('Live score')).toHaveTextContent('100 pts');
+    await answer('Madagascar');
+    expect(screen.getByText('Already on your list. Think of another!')).toBeInTheDocument();
+    expect(screen.getByLabelText('Live score')).toHaveTextContent('100 pts');
   });
   it('loads the new UTC challenge at midnight without starting an attempt', async () => {
     vi.setSystemTime(new Date('2026-11-17T23:59:59Z'));
