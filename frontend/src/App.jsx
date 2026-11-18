@@ -28,6 +28,7 @@ function GameApp() {
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);
   const inputRef = useRef(null);
+  const advancedRandomRef = useRef(null);
   const { challenge, status, answers } = game ?? { challenge: null, status: 'loading', answers: [] };
   const playing = status === 'playing';
   const finished = status === 'finished';
@@ -47,6 +48,12 @@ function GameApp() {
     setAnswer('');
     if (game?.mode === 'practice') setDialog(current => current === 'practice' ? null : current);
   }, [game?.id, game?.mode, challenge?.date]);
+
+  useEffect(() => {
+    if (!random || !finished || randomComplete || pending || advancedRandomRef.current === game.id) return;
+    advancedRandomRef.current = game.id;
+    void nextRandom();
+  }, [random, finished, randomComplete, pending, game?.id, nextRandom]);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -70,7 +77,7 @@ function GameApp() {
         <a href="/" className="wordmark" aria-label="Quintle home">quintle</a>
         <nav className="header-actions" aria-label="Game information">
           <button type="button" className="text-button" disabled={playing || pending} onClick={startRandom}
-            title="Play five random questions across all themes">Random</button>
+            title="Play five questions from five different themes">Random</button>
           <button type="button" className="text-button" disabled={playing || pending} onClick={() => setDialog('practice')}>Practice</button>
           <button type="button" className="icon-button" aria-label="How to play" onClick={() => setDialog('help')}>
             <CircleHelp size={18} />

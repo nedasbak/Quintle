@@ -165,16 +165,22 @@ function configureRandom() {
   });
 }
 
-it('samples five distinct questions with every catalog question eligible across all themes', () => {
+it('samples five different themes with every question eligible within each theme', () => {
   const catalog = getPracticeThemes();
   const all = catalog.flatMap(theme => theme.challenges.map(choice => choice.id));
-  const firstChoices = all.map((_, index) => pickRandomQuestions(catalog, () => (index + 0.5) / all.length)[0]);
+  const firstChoices = catalog.flatMap((theme, themeIndex) => theme.challenges.map((_, questionIndex) => {
+    const draws = [(themeIndex + 0.5) / catalog.length, 0, 0, 0, 0, (questionIndex + 0.5) / theme.challenges.length];
+    return pickRandomQuestions(catalog, () => draws.shift() ?? 0)[0];
+  }));
   expect(new Set(firstChoices)).toEqual(new Set(all));
   const picks = pickRandomQuestions(catalog, () => 0.99);
   expect(picks).toHaveLength(5);
   expect(new Set(picks).size).toBe(5);
+  expect(new Set(picks.map(id => getPracticeChallenge(id).theme)).size).toBe(5);
   expect(picks.every(choice => all.includes(choice))).toBe(true);
-  expect(() => pickRandomQuestions(themes)).toThrow('at least five');
+  expect(() => pickRandomQuestions(themes)).toThrow('at least five available themes');
+  expect(() => pickRandomQuestions([...catalog.slice(0, 4), { id: 'empty', challenges: [] }, catalog[0]]))
+    .toThrow('at least five available themes');
 });
 
 it('restores a random sequence and deadline, and rejects concurrent or premature advances', async () => {
@@ -236,11 +242,12 @@ it('handles random catalog errors and clears stale sequences when the server can
   expect(readRandomRun()).toBeNull();
 });
 
-it('plays all five random questions through the UI and offers a fresh set after the fifth', async () => {
+it('automatically switches through five different themes and offers a fresh set after the fifth', async () => {
   configureRandom();
   await act(async () => render(<App />));
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Random' })));
   const selected = readRandomRun().ids;
+  expect(new Set(selected.map(id => getPracticeChallenge(id).theme)).size).toBe(5);
   for (let index = 0; index < 5; index += 1) {
     expect(screen.getByText(`Random ${index + 1} / 5`)).toBeVisible();
     expect(practice.challenge.id).toBe(selected[index]);
@@ -250,9 +257,6 @@ it('plays all five random questions through the UI and offers a fresh set after 
       score: { correctness: 500, speed: 300, total: 800 } }, true));
     fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'answer' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Submit answer' })));
-    if (index < 4) {
-      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Next random question' })));
-    }
   }
   expect(screen.getByText('Random run complete · 5 of 5 questions')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Next random question' })).not.toBeInTheDocument();
@@ -261,4 +265,37 @@ it('plays all five random questions through the UI and offers a fresh set after 
   expect(screen.getByText('Random 1 / 5')).toBeVisible();
   expect(api.startPracticeGame).toHaveBeenCalledTimes(6);
   expect(getResults()).toEqual([]);
+});
+
+it('advances after a timed-out random round once the server confirms it ended', async () => {
+  configureRandom();
+  await act(async () => render(<App />));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Random' })));
+  const selected = readRandomRun().ids;
+  api.getPracticeGame.mockResolvedValueOnce(reply({ ...practice, status: 'finished', finishedAt: practice.startedAt + 30000 }));
+  await act(async () => vi.advanceTimersByTime(30000));
+  expect(screen.getByText('Random 2 / 5')).toBeVisible();
+  expect(practice.challenge.id).toBe(selected[1]);
+  expect(api.startPracticeGame).toHaveBeenCalledTimes(2);
+});
+
+it('keeps a failed automatic transition available for manual retry without skipping a theme', async () => {
+  configureRandom();
+  await act(async () => render(<App />));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Random' })));
+  const selected = readRandomRun().ids;
+  api.startPracticeGame.mockRejectedValueOnce(new Error('Next question offline'));
+  api.submitPracticeAnswer.mockResolvedValueOnce(reply({ ...practice, status: 'finished', finishedAt: Date.now(),
+    answers: getPracticeChallenge(practice.challenge.id).answers.slice(0, 5).map(variants => variants[0]),
+    score: { correctness: 500, speed: 300, total: 800 } }, true));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'answer' } });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Submit answer' })));
+  expect(screen.getByRole('alert')).toHaveTextContent('Next question offline');
+  expect(readRandomRun().index).toBe(0);
+  expect(api.startPracticeGame).toHaveBeenCalledTimes(2);
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(api.startPracticeGame).toHaveBeenCalledTimes(2);
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Next random question' })));
+  expect(practice.challenge.id).toBe(selected[1]);
+  expect(screen.getByText('Random 2 / 5')).toBeVisible();
 });

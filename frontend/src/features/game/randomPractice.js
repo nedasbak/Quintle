@@ -1,14 +1,16 @@
 export const RANDOM_QUESTIONS = 5;
-const STORAGE_KEY = 'quintle:random-practice:v1';
+const STORAGE_KEY = 'quintle:random-practice:v2';
 
 export function pickRandomQuestions(themes, random = Math.random) {
-  const ids = [...new Set(themes.flatMap(theme => theme.challenges.map(challenge => challenge.id)))];
-  if (ids.length < RANDOM_QUESTIONS) throw new Error('Random needs at least five available questions.');
+  const available = [...new Map(themes.filter(theme => theme.challenges.length)
+    .map(theme => [theme.id, theme])).values()];
+  if (available.length < RANDOM_QUESTIONS) throw new Error('Random needs at least five available themes.');
   for (let index = 0; index < RANDOM_QUESTIONS; index += 1) {
-    const choice = index + Math.floor(random() * (ids.length - index));
-    [ids[index], ids[choice]] = [ids[choice], ids[index]];
+    const choice = index + Math.floor(random() * (available.length - index));
+    [available[index], available[choice]] = [available[choice], available[index]];
   }
-  return ids.slice(0, RANDOM_QUESTIONS);
+  return available.slice(0, RANDOM_QUESTIONS).map(theme =>
+    theme.challenges[Math.floor(random() * theme.challenges.length)].id);
 }
 
 export function readRandomRun() {
