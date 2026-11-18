@@ -12,6 +12,7 @@ export default function Results({ game, remaining, now, shared = false }) {
   const [shareFallback, setShareFallback] = useState('');
   const ref = useRef(null);
   const { answers, challenge } = game;
+  const practice = game.mode === 'practice';
   // Bendras rezultatas imamas iš serverio, retumas lieka atskira peržiūra.
   const preview = getScoreBreakdown(answers, remaining);
   const score = game.score ?? preview;
@@ -22,7 +23,8 @@ export default function Results({ game, remaining, now, shared = false }) {
 
   async function shareResult() {
     const blocks = Array.from({ length: 5 }, (_, index) => index < answers.length ? '🟩' : '⬛').join('');
-    const text = `Quintle #${String(challenge.number).padStart(3, '0')} · ${challenge.date}\n${blocks}\n${answers.length}/5 · ${score.total} points\nFive answers. Thirty seconds.\n${resultLink}`;
+    const title = practice ? 'Quintle practice' : `Quintle #${String(challenge.number).padStart(3, '0')}`;
+    const text = `${title} · ${challenge.date}\n${blocks}\n${answers.length}/5 · ${score.total} points\nFive answers. Thirty seconds.\n${resultLink}`;
     try {
       await navigator.clipboard.writeText(text);
       setShareStatus('Copied to clipboard!');
@@ -36,7 +38,7 @@ export default function Results({ game, remaining, now, shared = false }) {
     <section ref={ref} className="results-screen" role="region" aria-label="Your result" tabIndex={-1}>
       <div className="result-hero">
         <Trophy className="result-trophy" size={26} strokeWidth={1.7} aria-hidden="true" />
-        <h1>{answers.length === 5 ? 'Five for five' : answers.length > 0 ? 'Every answer counts' : 'A fresh chance tomorrow'}</h1>
+        <h1>{answers.length === 5 ? 'Five for five' : answers.length > 0 ? 'Every answer counts' : practice ? 'Try another round' : 'A fresh chance tomorrow'}</h1>
         <p>{answers.length} of 5 correct in {elapsed} seconds</p>
         <output className="total-score" aria-label="Total score"><strong>{score.total.toLocaleString('en-US')}</strong><span>Total points</span></output>
       </div>

@@ -46,4 +46,33 @@ describe('shareable result links', () => {
       { answers: ['Mexico', 'Mexico'] }, { answers: ['Burma'] }, { answers: {} },
     ]) expect(readResultLink(encode({ ...valid, ...patch }))).toEqual({ kind: 'invalid' });
   });
+
+  it('preserves practice metadata and precise scores without sharing private session data', () => {
+    const practice = { ...game, mode: 'practice', id: 'private-session', token: 'private-token',
+      challenge: { ...game.challenge, category: 'Music', prompt: 'Name 5 musical instruments', answer_keys: ['private-key'] },
+      answers: ['Piano', 'Guitar', 'Flute', 'Violin', 'Trumpet'] };
+    const hash = new URL(createResultLink(practice, baseUrl)).hash;
+    const result = readResultLink(hash);
+    expect(result.kind).toBe('result');
+    expect(result.game.mode).toBe('practice');
+    expect(result.game.challenge).toMatchObject({ category: 'Music', prompt: 'Name 5 musical instruments' });
+    expect(result.game.answers).toEqual(practice.answers);
+    const elapsed = result.game.finishedAt - result.game.startedAt;
+    expect(elapsed).toBe(5049);
+    expect(getScoreBreakdown(result.game.answers, GAME_DURATION - elapsed).total).toBe(749);
+    const payload = atob(hash.slice('#results='.length).replace(/-/g, '+').replace(/_/g, '/'));
+    expect(JSON.parse(payload)).toMatchObject({ v: 3, mode: 'practice' });
+    for (const value of ['private-session', 'private-token', 'private-key', 'answer_keys']) expect(payload).not.toContain(value);
+  });
+
+  it('keeps older links daily and rejects unsupported practice modes', () => {
+    const payload = { date: game.challenge.date, elapsed: 30000, answers: ['Mexico'],
+      challenge: { category: 'Geography', prompt: 'Name 5 countries beginning with M' } };
+    for (const v of [1, 2]) expect(readResultLink(encode({ ...payload, v, mode: 'practice' })).game.mode).toBe('daily');
+    for (const mode of [undefined, null, 'daily', 'other', 0]) {
+      expect(readResultLink(encode({ ...payload, v: 3, mode }))).toEqual({ kind: 'invalid' });
+    }
+    const daily = new URL(createResultLink(game, baseUrl)).hash;
+    expect(JSON.parse(atob(daily.slice('#results='.length).replace(/-/g, '+').replace(/_/g, '/'))).v).toBe(2);
+  });
 });
