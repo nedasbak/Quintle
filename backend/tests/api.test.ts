@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -13,6 +13,7 @@ import { createApp } from '../src/app.ts';
 import { createGameService } from '../src/game.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
 import { getDailyChallenge } from '../../shared/challenges.mjs';
+import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
 import { migrateSubmissionDetails } from '../database/migrations/010_submission_details.ts';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -397,6 +398,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     await pool.query('ALTER TABLE game_sessions ADD COLUMN legacy_player_id BIGINT UNSIGNED NULL');
     await pool.query('UPDATE game_sessions g JOIN players p ON p.id = g.player_id SET g.legacy_player_id = p.player_id');
     await pool.query('ALTER TABLE game_sessions DROP FOREIGN KEY fk_session_player');
+    await pool.query('ALTER TABLE practice_sessions DROP FOREIGN KEY fk_practice_player');
     await pool.query(`ALTER TABLE game_sessions DROP INDEX uq_session_player_day, DROP COLUMN player_id,
       CHANGE COLUMN legacy_player_id player_id BIGINT UNSIGNED NOT NULL,
       ADD UNIQUE KEY uq_session_player_day (player_id, challenge_date)`);
@@ -405,6 +407,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const migration = await readFile(new URL('../database/migrations/005_player_uuids.sql', import.meta.url), 'utf8');
     for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
     await pool.query('ALTER TABLE game_sessions ADD UNIQUE KEY uq_session_player_challenge (player_id, challenge_id)');
+    await pool.query('ALTER TABLE practice_sessions ADD CONSTRAINT fk_practice_player FOREIGN KEY (player_id) REFERENCES players (id)');
     assert.deepEqual(await snapshot(), before);
     assert.deepEqual((await client.request()).data, original);
     const [players] = await pool.query<RowDataPacket[]>('SELECT id FROM players');
@@ -696,5 +699,58 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(((await pool.query('SELECT * FROM current_challenge'))[0] as RowDataPacket[]).length, 1);
     assert.equal((await waiting.request()).data.game.status, 'ready');
     assert.equal((await waiting.request('/start', {})).data.game.status, 'playing');
+  });
+  it('migrates practice storage and permits replay without changing daily progress', async () => {
+    const [[fresh]] = await pool.query<RowDataPacket[]>('SHOW CREATE TABLE practice_sessions');
+    await pool.query('DROP TABLE practice_sessions');
+    const migration = await readFile(new URL('../database/migrations/019_practice_sessions.sql', import.meta.url), 'utf8');
+    const migrate = async () => {
+      for (const sql of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(sql);
+    };
+    await migrate();
+    const [[upgraded]] = await pool.query<RowDataPacket[]>('SHOW CREATE TABLE practice_sessions');
+    assert.deepEqual(upgraded, fresh);
+    const client = player();
+    const daily = (await client.request()).data;
+    const [[owner]] = await pool.execute<RowDataPacket[]>('SELECT id FROM players WHERE token_hash = ?', [client.hash]);
+    const [dailyRows] = await pool.query('SELECT * FROM game_sessions ORDER BY id');
+    const challenge = getPracticeChallenge('dog-breeds')!;
+    const insert = (id: string) => pool.execute(`INSERT INTO practice_sessions
+      (id, player_id, challenge_key, theme, category, prompt, answer_keys, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, owner.id, challenge.id, challenge.theme, challenge.category, challenge.prompt, JSON.stringify(challenge.answers), '2026-11-18 23:59:58.000']);
+    const first = randomUUID();
+    await insert(first);
+    await assert.rejects(insert(randomUUID()), { code: 'ER_DUP_ENTRY' });
+    await assert.rejects(pool.execute('UPDATE practice_sessions SET player_id = ? WHERE id = ?',
+      [randomUUID(), first]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    for (const change of ["answer_keys = JSON_ARRAY()", "answers = JSON_OBJECT()", "answers = JSON_ARRAY(1,2,3,4,5,6)",
+      "status = 'expired', finished_at = '2026-11-19 00:00:27.999'"]) {
+      await assert.rejects(pool.execute(`UPDATE practice_sessions SET ${change} WHERE id = ?`, [first]),
+        { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+    }
+    const answers = challenge.answers.slice(0, 5).map(variants => variants[0]);
+    await assert.rejects(pool.execute("UPDATE practice_sessions SET answers = ?, status = 'completed', finished_at = ? WHERE id = ?",
+      [JSON.stringify(answers), '2026-11-19 00:00:28.000', first]), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+    await pool.execute("UPDATE practice_sessions SET answers = ?, status = 'completed', finished_at = ? WHERE id = ?",
+      [JSON.stringify(answers), '2026-11-19 00:00:03.049', first]);
+    const [[solved]] = await pool.execute<RowDataPacket[]>('SELECT * FROM practice_sessions WHERE id = ?', [first]);
+    assert.equal(solved.correct_answers, 5);
+    assert.equal(solved.score, 749);
+    assert.equal(Number(solved.remaining_seconds), 24.951);
+    assert.deepEqual(solved.answer_keys, challenge.answers);
+    const second = randomUUID();
+    await insert(second);
+    await pool.execute("UPDATE practice_sessions SET answers = ?, status = 'expired', finished_at = expires_at WHERE id = ?",
+      [JSON.stringify(answers.slice(0, 2)), second]);
+    const [[expired]] = await pool.execute<RowDataPacket[]>('SELECT score FROM practice_sessions WHERE id = ?', [second]);
+    assert.equal(expired.score, 200);
+    await insert(randomUUID());
+    const [before] = await pool.query('SELECT * FROM practice_sessions ORDER BY id');
+    await migrate();
+    assert.deepEqual((await pool.query('SELECT * FROM practice_sessions ORDER BY id'))[0], before);
+    assert.deepEqual((await pool.query('SELECT * FROM game_sessions ORDER BY id'))[0], dailyRows);
+    assert.deepEqual((await client.request()).data, daily);
+    const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE id = ?', [owner.id]);
+    assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
   });
 });
