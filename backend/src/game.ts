@@ -60,22 +60,34 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
         'SELECT * FROM game_sessions WHERE player_id = ? AND challenge_date = ? FOR UPDATE', [player.player_id, today],
       );
       let session = active ?? daily;
-      const date = session?.challenge_date ?? today;
-      const [[challenge]] = await connection.execute<RowDataPacket[]>(
-        'SELECT category, prompt, time_limit, required_answers, is_active FROM daily_challenges WHERE challenge_date = ? FOR SHARE', [date]);
-      const available = Boolean(challenge.is_active) && challenge.time_limit * 1000 === GAME_DURATION && challenge.required_answers === MAX_ANSWERS;
-      let accepted = false;
-      let activityAt: Date | null = null;
-      let feedback = { kind: 'hint', text: 'You’ve got this. Enter your first answer.' };
-      if (!session && !available) feedback = { kind: 'hint', text: "Today's challenge is unavailable. Please check again later." };
-
-      // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
-      if (session?.status === 'active' && now >= session.expires_at.getTime()) {
+      // An unattended attempt expires at its original deadline, even after UTC midnight.
+      const expired = session?.status === 'active' && now >= session.expires_at.getTime();
+      if (session && expired) {
         await connection.execute("UPDATE game_sessions SET status = 'expired', finished_at = ? WHERE id = ?",
           [session.expires_at, session.id]);
         session.status = 'expired';
-        feedback = { kind: 'hint', text: 'Time’s up. Every answer counts.' };
       }
+      // The next Start must use today's session without consuming an extra click.
+      if (action === 'start' && session?.status === 'expired' && session.challenge_date !== today) {
+        const [[current]] = await connection.execute<Session[]>(
+          'SELECT * FROM game_sessions WHERE player_id = ? AND challenge_date = ? FOR UPDATE', [player.player_id, today],
+        );
+        session = current;
+      }
+      const date = session?.challenge_date ?? today;
+      const [[challenge]] = await connection.execute<RowDataPacket[]>(
+        `SELECT category, prompt, time_limit, required_answers, is_active,
+          (SELECT COUNT(DISTINCT answer_id) FROM answer_keys WHERE challenge_date = ?) AS answer_count
+        FROM daily_challenges WHERE challenge_date = ? FOR SHARE`, [date, date]);
+      const available = Boolean(challenge.is_active) && challenge.time_limit * 1000 === GAME_DURATION
+        && challenge.required_answers === MAX_ANSWERS && challenge.answer_count >= challenge.required_answers;
+      let accepted = false;
+      let activityAt: Date | null = null;
+      let feedback = { kind: 'hint', text: expired && session?.status === 'expired'
+        ? 'Time’s up. Every answer counts.' : 'You’ve got this. Enter your first answer.' };
+      if (!session && !available) feedback = { kind: 'hint', text: "Today's challenge is unavailable. Please check again later." };
+
+      // Terminą nustato serveris; klientas negali pateikti savo laiko ar galutinio rezultato.
       if (action === 'start' && !session && available) {
         const sessionId = randomUUID();
         await connection.execute(
