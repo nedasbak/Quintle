@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GAME_DURATION, getDailyChallenge, remainingTime } from './challenges.js';
-import { getGame, startGame, submitAnswer } from './api.js';
-import { saveServerResults } from './storage.js';
+import { getGame, startGame, submitAnswer, getPracticeGame, startPracticeGame, submitPracticeAnswer } from './api.js';
+import { getPracticeId, savePracticeId, saveServerResults } from './storage.js';
 
 export default function useGame() {
   const [game, setGame] = useState(null);
@@ -26,7 +26,8 @@ export default function useGame() {
       gameRef.current = response.game;
       clockRef.current = { server: response.serverNow, local: performance.now() };
       setNow(response.serverNow);
-      saveServerResults(response.results);
+      if (response.game.mode !== 'practice') saveServerResults(response.results);
+      savePracticeId(response.game.mode === 'practice' ? response.game.id : null);
       setGame(response.game);
       setFeedback(response.feedback);
       setError('');
@@ -41,7 +42,17 @@ export default function useGame() {
       }
     }
   }, []);
-  const refresh = useCallback(() => run(getGame), [run]);
+  const refresh = useCallback(() => run(async signal => {
+    const current = gameRef.current;
+    const id = current ? current.mode === 'practice' ? current.id : null : getPracticeId();
+    if (!id) return getGame(signal);
+    try { return await getPracticeGame(id, signal); }
+    catch (failure) {
+      if (failure.status !== 404 || signal.aborted) throw failure;
+      savePracticeId(null);
+      return getGame(signal);
+    }
+  }), [run]);
 
   useEffect(() => {
     void refresh();
@@ -60,7 +71,7 @@ export default function useGame() {
       const time = clock.server + performance.now() - clock.local;
       setNow(time);
       const expired = current.status === 'playing' && remainingTime(current.startedAt, time) === 0;
-      const newDay = current.status !== 'playing' && current.challenge.date !== getDailyChallenge(time).date;
+      const newDay = current.mode !== 'practice' && current.status !== 'playing' && current.challenge.date !== getDailyChallenge(time).date;
       if ((expired || newDay) && performance.now() >= nextRefreshRef.current && !requestRef.current) {
         nextRefreshRef.current = performance.now() + 5000;
         void refresh();
@@ -80,9 +91,12 @@ export default function useGame() {
 
   // Dvigubas paspaudimas nepradeda naujo bandymo ir nepateikia atsakymo antrą kartą.
   const start = () => gameRef.current?.status === 'ready' ? run(startGame) : Promise.resolve(false);
-  const submit = answer => gameRef.current?.status === 'playing' ? run(signal => submitAnswer(answer, signal)) : Promise.resolve(false);
+  const startPractice = id => gameRef.current?.status !== 'playing' ? run(signal => startPracticeGame(id, signal)) : Promise.resolve(false);
+  const showDaily = () => gameRef.current?.status !== 'playing' ? run(getGame) : Promise.resolve(false);
+  const submit = answer => gameRef.current?.status === 'playing' ? run(signal => gameRef.current.mode === 'practice'
+    ? submitPracticeAnswer(gameRef.current.id, answer, signal) : submitAnswer(answer, signal)) : Promise.resolve(false);
   const remaining = !game || game.startedAt === null ? GAME_DURATION
     : remainingTime(game.startedAt, game.status === 'finished' ? game.finishedAt : now);
 
-  return { game, now, remaining, feedback, pending, error, refresh, start, submit };
+  return { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily };
 }
