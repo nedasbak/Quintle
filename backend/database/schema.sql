@@ -193,13 +193,14 @@ CREATE TABLE IF NOT EXISTS practice_sessions (
     prompt VARCHAR(255) NOT NULL,
     answer_keys JSON NOT NULL,
     answers JSON NOT NULL DEFAULT (JSON_ARRAY()),
+    skipped_questions JSON NOT NULL DEFAULT (JSON_ARRAY()),
     started_at DATETIME(3) NOT NULL,
     expires_at DATETIME(3) GENERATED ALWAYS AS (started_at + INTERVAL 30 SECOND) STORED,
     finished_at DATETIME(3) DEFAULT NULL,
     status ENUM('active', 'completed', 'expired') NOT NULL DEFAULT 'active',
     correct_answers TINYINT UNSIGNED GENERATED ALWAYS AS (JSON_LENGTH(answers)) STORED,
     remaining_seconds DECIMAL(5,3) UNSIGNED GENERATED ALWAYS AS (
-        CASE WHEN status = 'completed' THEN 30 - TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) / 1000000 ELSE 0 END
+        CASE WHEN status = 'completed' AND correct_answers = 5 THEN 30 - TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) / 1000000 ELSE 0 END
     ) STORED,
     score SMALLINT UNSIGNED GENERATED ALWAYS AS (FLOOR(100 * correct_answers + 10 * remaining_seconds)) STORED,
     active_player_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin GENERATED ALWAYS AS (
@@ -210,11 +211,13 @@ CREATE TABLE IF NOT EXISTS practice_sessions (
     CONSTRAINT fk_practice_player FOREIGN KEY (player_id) REFERENCES players (id),
     CONSTRAINT ck_practice_catalog CHECK (JSON_TYPE(answer_keys) = 'ARRAY' AND JSON_LENGTH(answer_keys) >= 5),
     CONSTRAINT ck_practice_answers CHECK (JSON_TYPE(answers) = 'ARRAY' AND JSON_LENGTH(answers) <= 5),
+    CONSTRAINT ck_practice_skips CHECK (JSON_TYPE(skipped_questions) = 'ARRAY'
+        AND JSON_LENGTH(skipped_questions) <= 5 AND (theme = 'random' OR JSON_LENGTH(skipped_questions) = 0)),
     CONSTRAINT ck_practice_state CHECK (
-        (status = 'active' AND finished_at IS NULL AND correct_answers < 5)
-        OR (status = 'completed' AND correct_answers = 5 AND finished_at IS NOT NULL
+        (status = 'active' AND finished_at IS NULL AND correct_answers + JSON_LENGTH(skipped_questions) < 5)
+        OR (status = 'completed' AND correct_answers + JSON_LENGTH(skipped_questions) = 5 AND finished_at IS NOT NULL
             AND finished_at >= started_at AND finished_at < expires_at)
-        OR (status = 'expired' AND correct_answers < 5 AND finished_at IS NOT NULL AND finished_at = expires_at)
+        OR (status = 'expired' AND correct_answers + JSON_LENGTH(skipped_questions) < 5 AND finished_at IS NOT NULL AND finished_at = expires_at)
     )
 ) ENGINE = InnoDB;
 SHOW FULL TABLES FROM quintle;

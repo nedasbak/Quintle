@@ -5,7 +5,7 @@ const PREFIX = '#results=';
 
 // Senos nuorodos palaikomos, o naujos išsaugo serverio užduoties viešą tekstą.
 function restoreResult(payload) {
-  if (!payload || ![1, 2, 3, 4].includes(payload.v) || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) return null;
+  if (!payload || ![1, 2, 3, 4, 5].includes(payload.v) || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) return null;
   if (payload.v >= 3 && payload.mode !== 'practice') return null;
   const timestamp = Date.parse(payload.date);
   if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== payload.date) return null;
@@ -22,9 +22,12 @@ function restoreResult(payload) {
     challenge = { date: payload.date, number: challenge.number, category: metadata.category, prompt: metadata.prompt };
   }
   if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > GAME_DURATION) return null;
-  if (answers.length < MAX_ANSWERS && elapsed !== GAME_DURATION) return null;
+  const skipped = payload.v === 5 ? payload.skipped : [];
+  if (!Array.isArray(skipped) || new Set(skipped).size !== skipped.length || answers.length + skipped.length > MAX_ANSWERS
+    || !skipped.every(index => Number.isInteger(index) && index >= 0 && index < answers.length + skipped.length)) return null;
+  if (answers.length + skipped.length < MAX_ANSWERS && elapsed !== GAME_DURATION) return null;
   let questions;
-  if (payload.v === 4) {
+  if (payload.v >= 4) {
     if (!Array.isArray(payload.questions) || payload.questions.length !== MAX_ANSWERS
       || !payload.questions.every(question => question && typeof question.theme === 'string' && question.theme.trim()
         && question.theme.length <= 40 && typeof question.category === 'string' && question.category.trim()
@@ -34,7 +37,7 @@ function restoreResult(payload) {
   }
   return {
     mode: payload.v >= 3 ? 'practice' : 'daily',
-    ...(questions ? { variant: 'random', questions } : {}),
+    ...(questions ? { variant: 'random', questions, ...(skipped.length ? { skipped } : {}) } : {}),
     challenge,
     status: 'finished',
     answers,
@@ -59,10 +62,11 @@ export function readResultLink(hash) {
 
 export function createResultLink(game, baseUrl = window.location.href) {
   const payload = {
-    v: game.variant === 'random' ? 4 : game.mode === 'practice' ? 3 : 2,
+    v: game.variant === 'random' ? game.skipped?.length ? 5 : 4 : game.mode === 'practice' ? 3 : 2,
     ...(game.mode === 'practice' ? { mode: 'practice' } : {}),
     date: game.challenge.date,
     answers: game.answers,
+    ...(game.variant === 'random' && game.skipped?.length ? { skipped: game.skipped } : {}),
     ...(game.variant === 'random' ? { questions: game.questions?.map(({ theme, category, prompt }) => ({ theme, category, prompt })) } : {}),
     elapsed: game.finishedAt - game.startedAt,
     challenge: {

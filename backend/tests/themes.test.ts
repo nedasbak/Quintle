@@ -4,7 +4,27 @@ import { it } from 'node:test';
 import { createApp } from '../src/app.ts';
 import { getPracticeChallenge, getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
-import { createRandomRound } from '../src/randomRound.ts';
+import { createRandomRound, replaceRandomQuestion } from '../src/randomRound.ts';
+
+it('replaces only the current prompt while preserving distinct themes and avoiding repeats', () => {
+  const questions = createRandomRound();
+  const unchanged = structuredClone(questions.slice(1));
+  const seen = new Set(questions.map(question => question.id));
+  let replacements = 0;
+  for (;;) {
+    const replacement = replaceRandomQuestion(questions, 0);
+    if (!replacement) break;
+    assert.equal(seen.has(replacement.id), false);
+    seen.add(replacement.id);
+    questions[0] = replacement;
+    replacements += 1;
+    assert.equal(new Set(questions.map(question => question.theme)).size, 5);
+    assert.deepEqual(questions.slice(1), unchanged);
+    assert.ok(replacements < getPracticeThemes().flatMap(theme => theme.challenges).length);
+  }
+  assert.ok(replacements > 0);
+  assert.equal(replaceRandomQuestion(questions, 0), null);
+});
 
 it('builds five single-answer prompts from five different themes in one random round', () => {
   for (let round = 0; round < 24; round += 1) {

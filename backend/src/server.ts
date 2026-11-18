@@ -4,6 +4,7 @@ import { createApp } from './app.ts';
 import { createGameService } from './game.ts';
 import { createPracticeService } from './practice.ts';
 import { mountFrontend } from './frontend.ts';
+import { migratePracticeSkips } from '../database/migrations/020_random_skips.ts';
 
 // Prisijungimas ir serverio adresas gaunami iš aplinkos, paslapčių kode nėra.
 const databaseUrl = process.env.DATABASE_URL;
@@ -25,6 +26,7 @@ if (Number(columns[0]?.NUMERIC_SCALE) !== 3) {
   await pool.end();
   throw new Error('Apply backend/database/migrations/001_precise_scoring.sql before starting the API.');
 }
+await migratePracticeSkips(pool);
 const app = createApp(createGameService(pool), createPracticeService(pool));
 
 // Tas pats serveris gali pateikti ir sukompiliuotą naršyklės sąsają.

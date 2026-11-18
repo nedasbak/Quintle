@@ -4,12 +4,12 @@ import useGame from '../src/features/game/useGame.js';
 import App from '../src/App.jsx';
 import * as api from '../src/features/game/api.js';
 import { getPracticeId, getResults, newGame, savePracticeId } from '../src/features/game/storage.js';
-import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
+import { getPracticeChallenge, getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 import { validateAnswer } from '../../shared/challenges.mjs';
 
 vi.mock('../src/features/game/api.js', () => ({
   getGame: vi.fn(), startGame: vi.fn(), submitAnswer: vi.fn(), getThemes: vi.fn(),
-  getPracticeGame: vi.fn(), startPracticeGame: vi.fn(), submitPracticeAnswer: vi.fn(), startRandomGame: vi.fn(),
+  getPracticeGame: vi.fn(), startPracticeGame: vi.fn(), submitPracticeAnswer: vi.fn(), startRandomGame: vi.fn(), skipPracticeQuestion: vi.fn(),
 }));
 const id = '00000000-0000-4000-8000-000000000001';
 const themes = [{ id: 'geography', name: 'Geography', challenges: [{ id: 'countries-m', prompt: 'Name 5 countries beginning with M' }] },
@@ -161,20 +161,35 @@ function configureRandom() {
   let count = 0;
   api.startRandomGame.mockImplementation(async () => {
     practice = { ...practice, id: id.slice(0, -3) + String(++count).padStart(3, '0'), variant: 'random', questions,
-      challenge: { ...practice.challenge, ...questions[0], id: 'random' }, status: 'playing', answers: [],
+      challenge: { ...practice.challenge, ...questions[0], id: 'random' }, status: 'playing', answers: [], skipped: [],
       startedAt: Date.now(), finishedAt: null, score: { correctness: 0, speed: 0, total: 0 } };
     return reply(practice);
   });
   api.submitPracticeAnswer.mockImplementation(async (_id, input) => {
-    const current = getPracticeChallenge(questions[practice.answers.length].id);
+    const questions = practice.questions;
+    const current = getPracticeChallenge(questions[practice.answers.length + practice.skipped.length].id);
     const match = validateAnswer(current, input, practice.answers);
     if (match.error) return { ...reply(practice), feedback: { kind: 'error', text: match.error } };
     const answers = [...practice.answers, match.answer];
-    const finished = answers.length === 5;
+    const finished = answers.length + practice.skipped.length === 5;
     practice = { ...practice, answers, status: finished ? 'finished' : 'playing', finishedAt: finished ? Date.now() : null,
       challenge: { ...practice.challenge, ...(finished ? { category: 'Mixed themes', prompt: 'Five questions. Five themes. One round.' }
-        : { ...questions[answers.length], id: 'random' }) },
-      score: { correctness: answers.length * 100, speed: finished ? 300 : 0, total: answers.length * 100 + (finished ? 300 : 0) } };
+        : { ...questions[answers.length + practice.skipped.length], id: 'random' }) },
+      score: { correctness: answers.length * 100, speed: answers.length === 5 ? 300 : 0, total: answers.length * 100 + (answers.length === 5 ? 300 : 0) } };
+    return reply(practice, true);
+  });
+  api.skipPracticeQuestion.mockImplementation(async () => {
+    const index = practice.answers.length + practice.skipped.length;
+    const otherThemes = practice.questions.filter((_, position) => position !== index).map(question => question.theme);
+    const seen = practice.questions.flatMap(question => [question.id, ...(question.replacedIds ?? [])]);
+    const choice = getPracticeThemes().filter(theme => !otherThemes.includes(theme.id))
+      .flatMap(theme => theme.challenges).find(question => !seen.includes(question.id));
+    const replacement = getPracticeChallenge(choice.id);
+    const changed = { id: replacement.id, theme: replacement.theme, category: replacement.category,
+      prompt: `Name one example: ${replacement.title.toLowerCase()}`,
+      replacedIds: [...(practice.questions[index].replacedIds ?? []), practice.questions[index].id] };
+    practice = { ...practice, questions: practice.questions.map((question, position) => position === index ? changed : question),
+      challenge: { ...practice.challenge, ...changed, id: 'random' } };
     return reply(practice, true);
   });
 }
@@ -193,12 +208,16 @@ it('fills one slot per theme and switches the prompt after each accepted answer 
   const slots = within(screen.getByRole('list', { name: 'Your five answers' })).getAllByRole('listitem');
   expect(slots).toHaveLength(5);
   for (let index = 0; index < 5; index += 1) expect(slots[index]).toHaveTextContent(practice.questions[index].prompt);
+  expect(within(slots[0]).getByRole('button', { name: 'Skip question' })).toBeEnabled();
+  expect(screen.getAllByRole('button', { name: 'Skip question' })).toHaveLength(1);
   await submitRandom('brainfck');
   expect(api.submitPracticeAnswer).toHaveBeenLastCalledWith(originalId, 'brainfck', expect.any(AbortSignal), 'programming-languages');
   expect(practice.answers).toEqual(['Brainfuck']);
   expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('types of pasta');
   expect(slots[0]).toHaveTextContent('Brainfuck');
   expect(slots[1]).toHaveAttribute('aria-current', 'step');
+  expect(within(slots[0]).queryByRole('button', { name: 'Skip question' })).not.toBeInTheDocument();
+  expect(within(slots[1]).getByRole('button', { name: 'Skip question' })).toBeEnabled();
   await submitRandom('Java');
   expect(api.submitPracticeAnswer).toHaveBeenLastCalledWith(originalId, 'Java', expect.any(AbortSignal), 'pasta-types');
   expect(practice.answers).toEqual(['Brainfuck']);
@@ -212,7 +231,7 @@ it('fills one slot per theme and switches the prompt after each accepted answer 
   expect(api.startPracticeGame).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: 'Next random question' })).not.toBeInTheDocument();
   expect(getResults()).toEqual([]);
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Play another random round' })));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Play again' })));
   expect(practice.id).not.toBe(originalId);
   expect(practice.answers).toEqual([]);
 });
@@ -273,4 +292,81 @@ it('sends the current question ID and rejects malformed mixed-theme server metad
     fetch.mockResolvedValueOnce({ ok: true, json: async () => reply({ ...practice, questions }) });
     await expect(real.getPracticeGame(practice.id)).rejects.toThrow('invalid random questions');
   }
+});
+
+it('replaces the current question without filling a slot and replays after five correct answers', async () => {
+  configureRandom();
+  await act(async () => render(<App />));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Random' })));
+  const startedAt = practice.startedAt, original = practice.questions;
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'draft' } });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Skip question' })));
+  expect(api.skipPracticeQuestion).toHaveBeenCalledWith(practice.id, 'programming-languages', expect.any(AbortSignal));
+  expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('');
+  expect(practice.questions[0].id).not.toBe(original[0].id);
+  expect(practice.questions.slice(1)).toEqual(original.slice(1));
+  expect(new Set(practice.questions.map(question => question.theme)).size).toBe(5);
+  expect(practice.answers).toEqual([]);
+  expect(practice.skipped).toEqual([]);
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(practice.questions[0].prompt);
+  expect(screen.getByRole('status', { name: 'Live score' })).toHaveTextContent('0 pts');
+  const replacement = practice.questions[0];
+  await submitRandom(getPracticeChallenge(replacement.id).answers[0][0]);
+  for (const value of ['Spaghetti', 'Labrador', 'Earth', 'Inception']) await submitRandom(value);
+  const result = screen.getByRole('region', { name: 'Your result' });
+  const slots = within(result).getAllByRole('listitem');
+  expect(slots[0]).toHaveTextContent(replacement.prompt);
+  expect(slots[1]).toHaveTextContent('Spaghetti');
+  expect(screen.queryByText('Skipped')).not.toBeInTheDocument();
+  expect(result).toHaveTextContent('5 of 5 correct');
+  expect(within(result).getByLabelText('Total score')).toHaveTextContent('800');
+  expect(practice.startedAt).toBe(startedAt);
+  await act(async () => fireEvent.click(within(result).getByRole('button', { name: 'Play again' })));
+  expect(practice.answers).toEqual([]);
+  expect(practice.questions[0].id).toBe('programming-languages');
+});
+
+it('restores replacement questions and accepted answers without resetting the timer', async () => {
+  configureRandom();
+  const view = await mount();
+  await act(async () => view.result.current.startRandom());
+  await act(async () => view.result.current.submit('Python'));
+  const first = practice.questions[0];
+  await act(async () => Promise.all([view.result.current.skip(), view.result.current.skip()]));
+  expect(api.skipPracticeQuestion).toHaveBeenCalledTimes(1);
+  expect(practice.questions[0]).toEqual(first);
+  expect(practice.questions[1].id).not.toBe('pasta-types');
+  expect(practice.answers).toEqual(['Python']);
+  expect(practice.score.total).toBe(100);
+  const replacement = practice.questions[1];
+  await act(async () => vi.advanceTimersByTime(5000));
+  view.unmount();
+  const restored = await mount();
+  expect(restored.result.current.remaining).toBe(25000);
+  expect(restored.result.current.game.questions[1]).toEqual(replacement);
+  expect(restored.result.current.game.answers).toEqual(['Python']);
+  expect(restored.result.current.game.challenge.prompt).toBe(replacement.prompt);
+});
+
+it('keeps failed replacements retryable and does not end a round after repeated skips', async () => {
+  configureRandom();
+  await act(async () => render(<App />));
+  expect(screen.queryByRole('button', { name: 'Skip question' })).not.toBeInTheDocument();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Random' })));
+  api.skipPracticeQuestion.mockRejectedValueOnce(new Error('Skip offline'));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Skip question' })));
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('programming languages');
+  expect(screen.getByText('Skip offline')).toBeVisible();
+  const seen = new Set(practice.questions.map(question => question.id));
+  for (let index = 0; index < 5; index += 1) {
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Skip question' })));
+    expect(seen.has(practice.questions[0].id)).toBe(false);
+    seen.add(practice.questions[0].id);
+    expect(new Set(practice.questions.map(question => question.theme)).size).toBe(5);
+  }
+  expect(practice.status).toBe('playing');
+  expect(practice.answers).toEqual([]);
+  expect(practice.score.total).toBe(0);
+  expect(screen.queryByRole('region', { name: 'Your result' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Skip question' })).toBeEnabled();
 });

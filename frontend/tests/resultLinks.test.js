@@ -30,6 +30,19 @@ it('shares one mixed-theme round with five question labels and no private answer
   }
 });
 
+it('preserves zero-point skipped positions and early completion in shared results', () => {
+  const questions = Array.from({ length: 5 }, (_, index) => ({ theme: `theme-${index}`, category: `Category ${index}`, prompt: `Name one example: category ${index}` }));
+  const random = { ...game, mode: 'practice', variant: 'random', questions, answers: ['Python', 'Spaghetti'], skipped: [0, 2, 4],
+    finishedAt: startedAt + 5000, challenge: { ...game.challenge, category: 'Mixed themes', prompt: 'Five questions. Five themes. One round.' } };
+  const hash = new URL(createResultLink(random, baseUrl)).hash;
+  expect(readResultLink(hash).game).toMatchObject({ variant: 'random', answers: ['Python', 'Spaghetti'], skipped: [0, 2, 4] });
+  const payload = JSON.parse(atob(hash.slice('#results='.length).replace(/-/g, '+').replace(/_/g, '/')));
+  expect(payload.v).toBe(5);
+  for (const skipped of [[0, 0, 4], [0, 2, 5], [0, -1, 4], [0], [0, 2, '4']]) {
+    expect(readResultLink(encode({ ...payload, skipped }))).toEqual({ kind: 'invalid' });
+  }
+});
+
 describe('shareable result links', () => {
   it('round-trips the original challenge, answers, precise duration, and score', () => {
     const url = new URL(createResultLink(game, baseUrl));

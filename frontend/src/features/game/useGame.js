@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GAME_DURATION, getDailyChallenge, remainingTime } from './challenges.js';
-import { getGame, startGame, submitAnswer, getPracticeGame, startPracticeGame, submitPracticeAnswer, startRandomGame } from './api.js';
+import { getGame, startGame, submitAnswer, getPracticeGame, startPracticeGame, submitPracticeAnswer, startRandomGame, skipPracticeQuestion } from './api.js';
 import { getPracticeId, savePracticeId, saveServerResults } from './storage.js';
 
 export default function useGame() {
@@ -97,14 +97,20 @@ export default function useGame() {
   const showDaily = () => gameRef.current?.status !== 'playing'
     ? run(getGame) : Promise.resolve(false);
   const startRandom = () => gameRef.current?.status !== 'playing' ? run(startRandomGame) : Promise.resolve(false);
+  const currentQuestionId = () => {
+    const current = gameRef.current;
+    return current.questions[current.answers.length + (current.skipped?.length ?? 0)].id;
+  };
+  const skip = () => gameRef.current?.status === 'playing' && gameRef.current.variant === 'random'
+    ? run(signal => skipPracticeQuestion(gameRef.current.id, currentQuestionId(), signal)) : Promise.resolve(false);
   const submit = answer => gameRef.current?.status === 'playing' ? run(signal => gameRef.current.mode === 'practice'
     ? gameRef.current.variant === 'random'
-      ? submitPracticeAnswer(gameRef.current.id, answer, signal, gameRef.current.questions[gameRef.current.answers.length].id)
+      ? submitPracticeAnswer(gameRef.current.id, answer, signal, currentQuestionId())
       : submitPracticeAnswer(gameRef.current.id, answer, signal)
     : submitAnswer(answer, signal)) : Promise.resolve(false);
   const remaining = !game || game.startedAt === null ? GAME_DURATION
     : remainingTime(game.startedAt, game.status === 'finished' ? game.finishedAt : now);
 
   return { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily,
-    startRandom };
+    startRandom, skip };
 }

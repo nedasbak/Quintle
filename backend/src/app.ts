@@ -112,6 +112,15 @@ export function createApp(play: ReturnType<typeof createGameService>, practice?:
     const result = await practice(playerHash(request, response), 'answer', request.params.sessionId as string, answer, questionId);
     response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
   });
+  app.post('/api/game/practice/:sessionId/skip', async (request, response) => {
+    const { questionId } = request.body;
+    if (Object.keys(request.body).some(key => key !== 'questionId') || typeof questionId !== 'string' || !/^[a-z0-9-]{1,80}$/.test(questionId)) {
+      return response.status(400).json({ error: 'Send the current question ID to skip it.' });
+    }
+    if (!practice) return response.status(503).json({ error: 'Practice is unavailable.' });
+    const result = await practice(playerHash(request, response), 'skip', request.params.sessionId as string, undefined, questionId);
+    response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
+  });
   app.get('/api/game', async (request, response) => response.json(await play(playerHash(request, response), 'read')));
   app.post('/api/game/start', async (request, response) => {
     if (Object.keys(request.body).length) return response.status(400).json({ error: 'Start does not accept game data.' });

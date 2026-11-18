@@ -29,6 +29,11 @@ async function request(path, signal, body) {
       || new Set(data.game.questions.map(question => question.theme)).size !== 5)) {
       throw new Error('The game server returned invalid random questions.');
     }
+    if (data.game.variant === 'random' && data.game.skipped !== undefined && (!Array.isArray(data.game.skipped)
+      || new Set(data.game.skipped).size !== data.game.skipped.length || data.game.answers.length + data.game.skipped.length > 5
+      || !data.game.skipped.every(index => Number.isInteger(index) && index >= 0 && index < data.game.answers.length + data.game.skipped.length))) {
+      throw new Error('The game server returned invalid skipped questions.');
+    }
     return data;
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -46,5 +51,6 @@ export const getThemes = signal => request('/themes', signal);
 export const getPracticeGame = (id, signal) => request(`/practice/${encodeURIComponent(id)}`, signal);
 export const startPracticeGame = (challengeId, signal) => request('/practice/start', signal, { challengeId });
 export const startRandomGame = signal => request('/practice/random/start', signal, {});
+export const skipPracticeQuestion = (id, questionId, signal) => request(`/practice/${encodeURIComponent(id)}/skip`, signal, { questionId });
 export const submitPracticeAnswer = (id, answer, signal, questionId) => request(`/practice/${encodeURIComponent(id)}/answers`, signal,
   { answer, ...(questionId ? { questionId } : {}) });

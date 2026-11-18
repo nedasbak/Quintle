@@ -16,6 +16,7 @@ import { GAME_DURATION } from '../../shared/gameRules.mjs';
 import { getDailyChallenge } from '../../shared/challenges.mjs';
 import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
 import { migrateSubmissionDetails } from '../database/migrations/010_submission_details.ts';
+import { migratePracticeSkips } from '../database/migrations/020_random_skips.ts';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -803,6 +804,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const migration = await readFile(new URL('../database/migrations/019_practice_sessions.sql', import.meta.url), 'utf8');
     const migrate = async () => {
       for (const sql of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(sql);
+      await migratePracticeSkips(pool);
     };
     await migrate();
     const [[upgraded]] = await pool.query<RowDataPacket[]>('SHOW CREATE TABLE practice_sessions');
@@ -1087,5 +1089,102 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const second = (await client.request(`/practice/${game.id}/answers`, { answer: 'StoredSecond', questionId: game.questions[1].id })).data;
     assert.equal(second.accepted, true);
     assert.deepEqual(second.game.answers, ['Private accepted value', 'StoredSecond']);
+  });
+
+  it('upgrades existing practice records for skipping without changing saved answers or scores', async () => {
+    const [before] = await pool.query('SELECT * FROM practice_sessions ORDER BY id');
+    await pool.query(`ALTER TABLE practice_sessions
+      DROP CHECK ck_practice_skips, DROP CHECK ck_practice_state, DROP COLUMN skipped_questions, DROP COLUMN score,
+      MODIFY COLUMN remaining_seconds DECIMAL(5,3) UNSIGNED GENERATED ALWAYS AS (
+        CASE WHEN status = 'completed' THEN 30 - TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) / 1000000 ELSE 0 END
+      ) STORED,
+      ADD COLUMN score SMALLINT UNSIGNED GENERATED ALWAYS AS (FLOOR(100 * correct_answers + 10 * remaining_seconds)) STORED AFTER remaining_seconds,
+      ADD CONSTRAINT ck_practice_state CHECK (
+        (status = 'active' AND finished_at IS NULL AND correct_answers < 5)
+        OR (status = 'completed' AND correct_answers = 5 AND finished_at IS NOT NULL AND finished_at >= started_at AND finished_at < expires_at)
+        OR (status = 'expired' AND correct_answers < 5 AND finished_at IS NOT NULL AND finished_at = expires_at)
+      )`);
+    await migratePracticeSkips(pool);
+    await migratePracticeSkips(pool);
+    assert.deepEqual((await pool.query('SELECT * FROM practice_sessions ORDER BY id'))[0], before);
+  });
+
+  it('replaces the current question without consuming a slot, score, or time', async () => {
+    const client = player(), stranger = player();
+    const daily = (await client.request()).data;
+    const game = (await client.request('/practice/random/start', {})).data.game;
+    const path = `/practice/${game.id}/skip`;
+    for (const body of [{}, { questionId: 1 }, { questionId: game.questions[0].id, score: 100 }]) {
+      assert.equal((await client.request(path, body)).status, 400);
+    }
+    assert.equal((await stranger.request(path, { questionId: game.questions[0].id })).status, 404);
+    now = game.startedAt + 2000;
+    const replacements = await Promise.all([client.request(path, { questionId: game.questions[0].id }), client.request(path, { questionId: game.questions[0].id })]);
+    assert.equal(replacements.filter(reply => reply.data.accepted).length, 1);
+    const replaced = replacements.find(reply => reply.data.accepted)!.data.game;
+    assert.notEqual(replaced.questions[0].id, game.questions[0].id);
+    assert.deepEqual(replaced.questions.slice(1), game.questions.slice(1));
+    assert.equal(new Set(replaced.questions.map((question: any) => question.theme)).size, 5);
+    assert.equal(JSON.stringify(replaced.questions).includes('replacedIds'), false);
+    assert.deepEqual(replaced.skipped, []);
+    assert.deepEqual(replaced.answers, []);
+    assert.equal(replaced.challenge.prompt, replaced.questions[0].prompt);
+    assert.equal(replaced.startedAt, game.startedAt);
+    assert.equal(replaced.id, game.id);
+    assert.equal(replaced.score.total, 0);
+    assert.deepEqual((await client.request(`/practice/${game.id}`)).data.game, replaced);
+    const stale = await client.request(`/practice/${game.id}/answers`, { answer: getPracticeChallenge(game.questions[0].id)!.answers[0][0], questionId: game.questions[0].id });
+    assert.equal(stale.data.accepted, false);
+    const firstAnswer = getPracticeChallenge(replaced.questions[0].id)!.answers[0][0];
+    now = game.startedAt + 3000;
+    const first = (await client.request(`/practice/${game.id}/answers`, { answer: firstAnswer, questionId: replaced.questions[0].id })).data.game;
+    assert.deepEqual(first.answers, [firstAnswer]);
+    const next = (await client.request(path, { questionId: first.questions[1].id })).data.game;
+    assert.deepEqual(next.questions[0], first.questions[0]);
+    assert.deepEqual(next.answers, first.answers);
+    assert.equal(next.score.total, 100);
+    assert.notEqual(next.questions[1].id, first.questions[1].id);
+    let finished = next;
+    for (let index = 1; index < 5; index += 1) {
+      now = game.startedAt + (index + 3) * 1000;
+      const question = finished.questions[index];
+      const answer = getPracticeChallenge(question.id)!.answers.find((variants: string[]) => !finished.answers.includes(variants[0]))![0];
+      const response = await client.request(`/practice/${game.id}/answers`, { answer, questionId: question.id });
+      assert.equal(response.data.accepted, true);
+      finished = response.data.game;
+    }
+    assert.equal(finished.status, 'finished');
+    assert.equal(finished.startedAt, game.startedAt);
+    assert.equal(finished.finishedAt, now);
+    assert.deepEqual(finished.skipped, []);
+    assert.deepEqual(finished.score, { correctness: 500, speed: 230, total: 730 });
+    const [[stored]] = await pool.execute<RowDataPacket[]>('SELECT score, correct_answers, skipped_questions, answer_keys FROM practice_sessions WHERE id = ?', [game.id]);
+    assert.equal(stored.score, 730);
+    assert.equal(stored.correct_answers, 5);
+    assert.deepEqual(stored.skipped_questions, []);
+    assert.equal(stored.answer_keys[0].id, replaced.questions[0].id);
+    assert.ok(stored.answer_keys[0].replacedIds.includes(game.questions[0].id));
+    assert.equal((await client.request(path, { questionId: finished.questions[4].id })).data.accepted, false);
+    const replay = (await client.request('/practice/random/start', {})).data.game;
+    assert.notEqual(replay.id, game.id);
+    assert.deepEqual(replay.answers, []);
+    const after = (await client.request()).data;
+    assert.deepEqual(after.game, daily.game);
+    assert.deepEqual(after.results, daily.results);
+  });
+
+  it('rejects skips after timeout and in single-theme practice', async () => {
+    const client = player();
+    const game = (await client.request('/practice/random/start', {})).data.game;
+    now = game.startedAt + GAME_DURATION;
+    const expired = (await client.request(`/practice/${game.id}/skip`, { questionId: game.questions[0].id })).data;
+    assert.equal(expired.accepted, false);
+    assert.equal(expired.game.status, 'finished');
+    assert.deepEqual(expired.game.skipped, []);
+    const single = (await client.request('/practice/start', { challengeId: 'dog-breeds' })).data.game;
+    const denied = (await client.request(`/practice/${single.id}/skip`, { questionId: 'dog-breeds' })).data;
+    assert.equal(denied.accepted, false);
+    assert.deepEqual(denied.game.answers, []);
+    assert.match(denied.feedback.text, /Random/);
   });
 });

@@ -24,7 +24,7 @@ export default function App() {
 
 function GameApp() {
   const { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily,
-    startRandom } = useGame();
+    startRandom, skip } = useGame();
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);
   const inputRef = useRef(null);
@@ -33,6 +33,7 @@ function GameApp() {
   const finished = status === 'finished';
   const practice = game?.mode === 'practice';
   const random = practice && game?.variant === 'random';
+  const questionId = random ? game.questions[answers.length + (game.skipped?.length ?? 0)]?.id : null;
   const statistics = useMemo(() => getStatistics(getResults()), [game]);
   // Sąsaja rodo serverio patvirtintus taškus ir užduoties tekstą.
   const liveScore = game?.score.correctness ?? 0;
@@ -45,12 +46,17 @@ function GameApp() {
   useEffect(() => {
     setAnswer('');
     if (game?.mode === 'practice') setDialog(current => current === 'practice' ? null : current);
-  }, [game?.id, game?.mode, challenge?.date]);
+  }, [game?.id, game?.mode, challenge?.date, questionId]);
 
   async function onSubmit(event) {
     event.preventDefault();
     if (await submit(answer)) setAnswer('');
     else inputRef.current?.select();
+    inputRef.current?.focus();
+  }
+
+  async function onSkip() {
+    if (await skip()) setAnswer('');
     inputRef.current?.focus();
   }
 
@@ -87,7 +93,8 @@ function GameApp() {
           <span>{challenge.category}</span>
         </div>
 
-        {finished ? <Results key={game.id ?? challenge.date} game={game} remaining={remaining} now={now} /> : (
+        {finished ? <Results key={game.id ?? challenge.date} game={game} remaining={remaining} now={now} pending={pending}
+          onPlayAgain={practice && !random ? () => startPractice(challenge.id) : startRandom} /> : (
           <section className="game-screen" aria-labelledby="challenge-title">
             <div className="challenge-heading">
               {playing ? (
@@ -108,7 +115,8 @@ function GameApp() {
               )}
             </div>
 
-            <AnswerSlots answers={answers} status={status} challengeDate={challenge.date} questions={game.questions} />
+            <AnswerSlots answers={answers} status={status} challengeDate={challenge.date} questions={game.questions} skipped={game.skipped}
+              onSkip={random ? onSkip : undefined} skipDisabled={pending || remaining === 0} />
 
             <div className="entry-area">
               <form className="answer-form" onSubmit={onSubmit} noValidate>
@@ -139,10 +147,6 @@ function GameApp() {
         )}
 
         {practice && finished && <div className="practice-actions">
-          <button type="button" className="primary-button" disabled={pending}
-            onClick={random ? startRandom : () => startPractice(challenge.id)}>
-            {random ? 'Play another random round' : 'Play again'}
-          </button>
           <button type="button" className="text-button" disabled={pending} onClick={showDaily}>Daily challenge</button>
           {error && <p role="alert">{error}</p>}
         </div>}
