@@ -7,6 +7,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { it } from 'node:test';
 import { createApp } from '../src/app.ts';
 import { mountFrontend } from '../src/frontend.ts';
+import { getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 
 for (const built of [false, true]) {
   it(built ? 'serves the built frontend and its assets alongside the API' : 'redirects to the frontend when no build exists', async () => {
@@ -50,7 +51,7 @@ for (const built of [false, true]) {
       }
       const themes = await fetch(base + '/api/game/themes');
       assert.equal(themes.status, 200);
-      assert.equal((await themes.json()).themes.length, 6);
+      assert.deepEqual((await themes.json()).themes, getPracticeThemes());
       assert.equal((await fetch(base + '/api/missing')).status, 404);
       assert.equal((await fetch(base + '/missing')).status, 404);
     } finally {

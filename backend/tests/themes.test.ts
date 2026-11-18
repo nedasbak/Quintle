@@ -7,7 +7,8 @@ import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
 
 it('provides distinct themes and stable challenges with at least five valid answers', () => {
   const themes = getPracticeThemes();
-  assert.equal(themes.length, 6);
+  assert.equal(themes.length, 16);
+  for (const theme of themes) assert.ok(theme.challenges.length >= 5, `${theme.name} needs at least five challenges.`);
   assert.equal(new Set(themes.map(theme => theme.id)).size, themes.length);
   const choices = themes.flatMap(theme => theme.challenges);
   assert.equal(new Set(choices.map(choice => choice.id)).size, choices.length);
@@ -29,8 +30,40 @@ it('rejects unknown challenge IDs and isolates catalog data from caller mutation
   const challenge = getPracticeChallenge('dog-breeds')!;
   challenge.answers[0][0] = 'Changed';
   assert.equal(getPracticeChallenge('dog-breeds')!.answers[0][0], 'Labrador Retriever');
-  getPracticeThemes()[0].challenges.length = 0;
-  assert.equal(getPracticeThemes()[0].challenges.length, 2);
+  const themes = getPracticeThemes(), originalCount = themes[0].challenges.length;
+  themes[0].challenges.length = 0;
+  assert.equal(getPracticeThemes()[0].challenges.length, originalCount);
+});
+
+it('keeps new challenge boundaries and aliases consistent', () => {
+  const cats = getPracticeChallenge('panthera-cats')!;
+  assert.deepEqual(validateAnswer(cats, 'SNOW LEOPARDS', []), { answer: 'Snow leopard' });
+  assert.match(validateAnswer(cats, 'Cheetah', []).error!, /try another/i);
+  const units = getPracticeChallenge('si-base-units')!;
+  assert.deepEqual(validateAnswer(units, 'meters', []), { answer: 'Metre' });
+  assert.match(validateAnswer(units, 'meter', ['Metre']).error!, /already/i);
+});
+
+it('validates the new themes without conflating similar names or accepting out-of-scope answers', () => {
+  const cases = [
+    ['programming-languages', 'CPP', 'C++', 'HTML'],
+    ['ancient-civilizations', 'Harappans', 'Indus Valley', 'Inca'],
+    ['elements-starting-c', 'Cesium', 'Caesium', 'Oxygen'],
+    ['nolan-films-before-2025', 'Prestige', 'The Prestige', 'Avatar'],
+    ['minecraft-nether-biomes', 'Basalt Delta', 'Basalt Deltas', 'The End'],
+    ['pasta-types', 'Fettucine', 'Fettuccine', 'Paella'],
+    ['paris-2024-ball-sports', 'Soccer', 'Football', 'Badminton'],
+    ['rock-bands-before-1990', 'ACDC', 'AC/DC', 'Oasis'],
+    ['smartphone-brands', 'One Plus', 'OnePlus', 'Adidas'],
+    ['harry-potter-characters', 'Tom Riddle', 'Lord Voldemort', 'Gandalf'],
+  ];
+  for (const [id, alias, canonical, invalid] of cases) {
+    const challenge = getPracticeChallenge(id)!;
+    assert.deepEqual(validateAnswer(challenge, alias, []), { answer: canonical });
+    assert.match(validateAnswer(challenge, invalid, []).error!, /try another/i);
+  }
+  assert.deepEqual(validateAnswer(getPracticeChallenge('programming-languages')!, 'CSharp', ['C', 'C++']), { answer: 'C#' });
+  assert.match(validateAnswer(getPracticeChallenge('first-ten-us-presidents')!, 'Adams', []).error!, /try another/i);
 });
 
 it('serves theme metadata without answers, player cookies, or a game request', async () => {
