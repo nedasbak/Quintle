@@ -4,6 +4,7 @@ import type { ErrorRequestHandler, Request, Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { MAX_ANSWER_LENGTH } from '../../shared/gameRules.mjs';
 import { normalizeAnswer } from '../../shared/challenges.mjs';
+import { getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 import type { createGameService } from './game.ts';
 
 // Anoniminį žaidėją identifikuoja HttpOnly slapukas; duomenų bazėje lieka tik jo maiša.
@@ -39,6 +40,7 @@ export function createApp(play: ReturnType<typeof createGameService>) {
     if (!request.body || Array.isArray(request.body) || typeof request.body !== 'object') return response.status(400).json({ error: 'Invalid request body.' });
     next();
   });
+  app.get('/api/game/themes', (_request, response) => response.json({ themes: getPracticeThemes() }));
   app.get('/api/game', async (request, response) => response.json(await play(playerHash(request, response), 'read')));
   app.post('/api/game/start', async (request, response) => {
     if (Object.keys(request.body).length) return response.status(400).json({ error: 'Start does not accept game data.' });

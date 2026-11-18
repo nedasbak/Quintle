@@ -2,7 +2,7 @@ import { MAX_ANSWERS } from './gameRules.mjs';
 export { GAME_DURATION, calculateScore, remainingTime } from './gameRules.mjs';
 
 // Esamas kategorijų rinkinys naudojamas pradiniams duomenims ir senoms rezultatų nuorodoms.
-const examples = [
+export const starterChallenges = [
   {
     title: 'Countries beginning with M',
     emphasis: 'M',
@@ -46,8 +46,8 @@ const EPOCH = Date.UTC(2026, 10, 17);
 export function getDailyChallenge(now = Date.now()) {
   const date = new Date(now).toISOString().slice(0, 10);
   const offset = Math.floor((Date.parse(date) - EPOCH) / DAY);
-  const index = ((offset % examples.length) + examples.length) % examples.length;
-  return { ...examples[index], date, number: Math.max(1, offset + 1) };
+  const index = ((offset % starterChallenges.length) + starterChallenges.length) % starterChallenges.length;
+  return { ...starterChallenges[index], date, number: Math.max(1, offset + 1) };
 }
 
 // Rašybos registras, diakritiniai ženklai ir papildomi tarpai suvienodinami.

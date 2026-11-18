@@ -7,7 +7,7 @@
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
     "build": "tsc --noEmit --strict --allowJs --module nodenext --moduleResolution nodenext --target es2024 --allowImportingTsExtensions src/server.ts",
-    "test": "node --test tests/scoring.test.ts tests/api.test.ts",
+    "test": "node --test tests/scoring.test.ts tests/api.test.ts tests/themes.test.ts",
     "test:integration": "node tests/runMysqlTests.mjs"
   },
   "dependencies": {
