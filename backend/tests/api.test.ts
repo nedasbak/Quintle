@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import { createPool } from 'mysql2/promise';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
@@ -105,6 +109,38 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
       DROP INDEX ix_session_challenge_score, DROP INDEX fk_session_challenge_id, DROP COLUMN challenge_id`);
   }
 
+  it('starts the actual server against the current schema', async () => {
+    const reservation = createServer().listen(0, '127.0.0.1');
+    await once(reservation, 'listening');
+    const address = reservation.address();
+    assert.ok(address && typeof address === 'object');
+    const port = address.port;
+    await new Promise<void>(resolve => reservation.close(() => resolve()));
+    const child = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
+      windowsHide: true, env: { ...process.env, DATABASE_URL: databaseUrl, PORT: String(port), HOST: '127.0.0.1' },
+    });
+    const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+    let output = '';
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`Startup timed out: ${output}`)), 10_000);
+        const fail = (error: Error) => { clearTimeout(timer); reject(error); };
+        child.once('error', fail);
+        child.once('exit', code => fail(new Error(`Startup exited ${code}: ${output}`)));
+        child.stderr.on('data', chunk => { output += chunk; });
+        child.stdout.on('data', chunk => {
+          output += chunk;
+          if (output.includes('Quintle API listening')) { clearTimeout(timer); resolve(); }
+        });
+      });
+      const response = await fetch(`http://127.0.0.1:${port}/api/game`, { signal: AbortSignal.timeout(5000) });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).game.challenge.date, new Date().toISOString().slice(0, 10));
+    } finally {
+      child.kill();
+      await closed;
+    }
+  });
   it('calculates a precise score through HTTP and stores the same score in MySQL', async () => {
     const client = player();
     assert.equal((await client.request()).data.game.status, 'ready');

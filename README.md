@@ -18,7 +18,14 @@ $env:DATABASE_URL = 'mysql://root:YOUR_PASSWORD@127.0.0.1:3306/quintle'
 npm.cmd run dev
 ```
 
+In Git Bash, set the connection using:
+
+```bash
+export DATABASE_URL='mysql://root:YOUR_PASSWORD@127.0.0.1:3306/quintle'
+```
+
 Replace `YOUR_PASSWORD` with your MySQL password; URL-encode special characters.
+For a root account with no password, use `mysql://root@127.0.0.1:3306/quintle`.
 Open **http://127.0.0.1:5173**. The API runs on port **3001**.
 
 Existing databases: stop the API, back up, then apply only pending migrations in
