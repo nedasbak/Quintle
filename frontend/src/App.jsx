@@ -23,7 +23,8 @@ export default function App() {
 }
 
 function GameApp() {
-  const { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily } = useGame();
+  const { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily,
+    randomRun, startRandom, nextRandom } = useGame();
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);
   const inputRef = useRef(null);
@@ -31,6 +32,8 @@ function GameApp() {
   const playing = status === 'playing';
   const finished = status === 'finished';
   const practice = game?.mode === 'practice';
+  const random = practice && randomRun?.sessionId === game.id ? randomRun : null;
+  const randomComplete = random && random.index === random.ids.length - 1;
   const statistics = useMemo(() => getStatistics(getResults()), [game]);
   // Sąsaja rodo serverio patvirtintus taškus ir užduoties tekstą.
   const liveScore = game?.score.correctness ?? 0;
@@ -66,6 +69,8 @@ function GameApp() {
       <header className="site-header">
         <a href="/" className="wordmark" aria-label="Quintle home">quintle</a>
         <nav className="header-actions" aria-label="Game information">
+          <button type="button" className="text-button" disabled={playing || pending} onClick={startRandom}
+            title="Play five random questions across all themes">Random</button>
           <button type="button" className="text-button" disabled={playing || pending} onClick={() => setDialog('practice')}>Practice</button>
           <button type="button" className="icon-button" aria-label="How to play" onClick={() => setDialog('help')}>
             <CircleHelp size={18} />
@@ -78,7 +83,8 @@ function GameApp() {
 
       <main className="main-content">
         <div className="challenge-meta">
-          <span title={'Challenge for ' + challenge.date + ' UTC'}>{practice ? 'Practice' : `Daily #${String(challenge.number).padStart(3, '0')}`}</span>
+          <span title={'Challenge for ' + challenge.date + ' UTC'}>{random ? `Random ${random.index + 1} / ${random.ids.length}`
+            : practice ? 'Practice' : `Daily #${String(challenge.number).padStart(3, '0')}`}</span>
           <span>{challenge.category}</span>
         </div>
 
@@ -134,10 +140,15 @@ function GameApp() {
         )}
 
         {practice && finished && <div className="practice-actions">
-          <button type="button" className="primary-button" disabled={pending} onClick={() => startPractice(challenge.id)}>Play again</button>
+          {randomComplete && <p role="status">Random run complete · {random.ids.length} of {random.ids.length} questions</p>}
+          <button type="button" className="primary-button" disabled={pending}
+            onClick={random ? randomComplete ? startRandom : nextRandom : () => startPractice(challenge.id)}>
+            {random ? randomComplete ? 'Play another random set' : 'Next random question' : 'Play again'}
+          </button>
           <button type="button" className="text-button" disabled={pending} onClick={showDaily}>Daily challenge</button>
           {error && <p role="alert">{error}</p>}
         </div>}
+        {finished && !practice && error && <p className="answer-feedback feedback-error" role="alert">{error}</p>}
         <footer className="game-footer">
           <span>{practice ? 'Practice leaves your daily streak unchanged' : 'A new challenge every day at 00:00 UTC'}</span>
           <button type="button" className="text-button" onClick={() => setDialog('help')}>How to play</button>
