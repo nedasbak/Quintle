@@ -1,9 +1,9 @@
 import { fileURLToPath } from 'node:url';
-import express from 'express';
 import { createPool } from 'mysql2/promise';
 import { createApp } from './app.ts';
 import { createGameService } from './game.ts';
 import { createPracticeService } from './practice.ts';
+import { mountFrontend } from './frontend.ts';
 
 // Prisijungimas ir serverio adresas gaunami iš aplinkos, paslapčių kode nėra.
 const databaseUrl = process.env.DATABASE_URL;
@@ -29,8 +29,7 @@ const app = createApp(createGameService(pool), createPracticeService(pool));
 
 // Tas pats serveris gali pateikti ir sukompiliuotą naršyklės sąsają.
 const frontend = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
-app.use(express.static(frontend));
-app.get('/', (_request, response) => response.sendFile('index.html', { root: frontend }));
+mountFrontend(app, frontend);
 const server = app.listen(port, process.env.HOST || '127.0.0.1', () => console.log(`Quintle API listening on port ${port}`));
 
 // Stabdant procesą uždaromos HTTP ir duomenų bazės jungtys.
