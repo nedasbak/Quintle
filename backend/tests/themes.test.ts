@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { it } from 'node:test';
-import { createApp } from '../src/app.ts';
+import { createApp } from '../src/application.ts';
 import { getPracticeChallenge, getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
 import { createRandomRound, replaceRandomQuestion } from '../src/randomRound.ts';

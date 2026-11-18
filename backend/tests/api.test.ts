@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import { createPool } from 'mysql2/promise';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { createApp } from '../src/app.ts';
+import { createApp } from '../src/application.ts';
 import { createGameService } from '../src/game.ts';
 import { createPracticeService } from '../src/practice.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
@@ -17,6 +17,8 @@ import { getDailyChallenge } from '../../shared/challenges.mjs';
 import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
 import { migrateSubmissionDetails } from '../database/migrations/010_submission_details.ts';
 import { migratePracticeSkips } from '../database/migrations/020_random_skips.ts';
+import { createVercelApp } from '../src/index.ts';
+import { createRuntime } from '../src/runtime.ts';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -1186,5 +1188,39 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(denied.accepted, false);
     assert.deepEqual(denied.game.answers, []);
     assert.match(denied.feedback.text, /Random/);
+  });
+
+  it('serves the Vercel entrypoint with runtime MySQL initialization and unchanged public API paths', async () => {
+    const previousUrl = process.env.DATABASE_URL, previousVercel = process.env.VERCEL;
+    process.env.DATABASE_URL = databaseUrl;
+    process.env.VERCEL = '1';
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    const entry = createVercelApp(async () => {
+      runtime = await createRuntime();
+      return runtime.app;
+    }).listen(0, '127.0.0.1');
+    try {
+      await once(entry, 'listening');
+      const address = entry.address();
+      assert.ok(address && typeof address === 'object');
+      const url = `http://127.0.0.1:${address.port}`;
+      const metadata = await fetch(url + '/api/game/themes');
+      assert.equal(metadata.status, 200);
+      assert.equal((await metadata.json()).themes.length, 16);
+      const response = await fetch(url + '/api/game/practice/random/start', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: url }, body: '{}' });
+      assert.equal(response.status, 200);
+      const { game } = await response.json();
+      assert.equal(game.variant, 'random');
+      assert.equal(game.questions.length, 5);
+      assert.ok(response.headers.get('set-cookie')?.includes('HttpOnly'));
+      assert.equal((await fetch(url + '/')).status, 404);
+    } finally {
+      if (previousUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previousUrl;
+      if (previousVercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = previousVercel;
+      entry.closeAllConnections();
+      await new Promise<void>(resolve => entry.close(() => resolve()));
+      await runtime?.pool.end();
+    }
   });
 });

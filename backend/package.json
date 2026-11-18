@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": { "node": "24.x" },
   "scripts": {
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
-    "build": "tsc --noEmit --strict --allowJs --module nodenext --moduleResolution nodenext --target es2024 --allowImportingTsExtensions src/server.ts",
-    "test": "node --test tests/scoring.test.ts tests/api.test.ts tests/themes.test.ts tests/frontend.test.ts tests/answerMatching.test.ts",
+    "build": "tsc --noEmit --strict --allowJs --module nodenext --moduleResolution nodenext --target es2024 --allowImportingTsExtensions src/server.ts src/index.ts",
+    "test": "node --test tests/scoring.test.ts tests/api.test.ts tests/themes.test.ts tests/frontend.test.ts tests/answerMatching.test.ts tests/vercel.test.ts",
     "test:integration": "node tests/runMysqlTests.mjs"
   },
   "dependencies": {
+    "@vercel/functions": "^3.11.3",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.4",
     "mysql2": "^3.24.6"

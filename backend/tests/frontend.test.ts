@@ -5,7 +5,7 @@ import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { it } from 'node:test';
-import { createApp } from '../src/app.ts';
+import { createApp } from '../src/application.ts';
 import { mountFrontend } from '../src/frontend.ts';
 import { getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 

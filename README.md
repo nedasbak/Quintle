@@ -42,3 +42,9 @@ npm.cmd start
 ```
 
 Open **http://127.0.0.1:3001**. Outside Windows PowerShell, use `npm` instead of `npm.cmd`.
+
+## Vercel
+
+Import the repository root as one project. Set `DATABASE_URL` to a hosted MySQL URL with the schema and seed imported; Docker hostnames are local only. Keep `APP_ORIGIN` unset for same-domain previews, or set it to your exact production origin. Preserve your provider's TLS options in the URL.
+
+Test services locally with `npx vercel dev --local` after setting `DATABASE_URL`.

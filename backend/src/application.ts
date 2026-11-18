@@ -21,6 +21,7 @@ function playerHash(request: Request, response: Response) {
 export function createApp(play: ReturnType<typeof createGameService>, practice?: ReturnType<typeof createPracticeService>) {
   const app = express();
   app.disable('x-powered-by');
+  if (process.env.VERCEL === '1') app.set('trust proxy', 1);
   app.use('/api', (_request, response, next) => {
     response.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     next();
