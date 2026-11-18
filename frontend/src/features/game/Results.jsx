@@ -62,7 +62,7 @@ export default function Results({ game, remaining, now, shared = false }) {
       <p className="share-status" role="status">{shareStatus || 'Spoiler-free preview. Full match details in the link.'}</p>
       <a className="result-link" href={resultLink} target="_blank" rel="noopener noreferrer">View match results</a>
       {shareFallback && <textarea className="share-fallback" aria-label="Result to copy" readOnly value={shareFallback} onFocus={(event) => event.target.select()} />}
-      {!shared && <p className="next-challenge">Next challenge in <strong>{nextChallengeIn(now)}</strong></p>}
+      {!shared && game.mode !== 'practice' && <p className="next-challenge">Next challenge in <strong>{nextChallengeIn(now)}</strong></p>}
     </section>
   );
 }

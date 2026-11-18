@@ -1,14 +1,17 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import useGame from '../src/features/game/useGame.js';
+import App from '../src/App.jsx';
 import * as api from '../src/features/game/api.js';
 import { getPracticeId, getResults, newGame, savePracticeId } from '../src/features/game/storage.js';
 
 vi.mock('../src/features/game/api.js', () => ({
-  getGame: vi.fn(), startGame: vi.fn(), submitAnswer: vi.fn(),
+  getGame: vi.fn(), startGame: vi.fn(), submitAnswer: vi.fn(), getThemes: vi.fn(),
   getPracticeGame: vi.fn(), startPracticeGame: vi.fn(), submitPracticeAnswer: vi.fn(),
 }));
 const id = '00000000-0000-4000-8000-000000000001';
+const themes = [{ id: 'geography', name: 'Geography', challenges: [{ id: 'countries-m', prompt: 'Name 5 countries beginning with M' }] },
+  { id: 'space', name: 'Space', challenges: [{ id: 'solar-system-planets', prompt: 'Name 5 solar system planets' }] }];
 let practice;
 const reply = (game, accepted = false) => ({ game, accepted, serverNow: Date.now(), feedback: { kind: 'hint', text: '' },
   ...(game.mode === 'practice' ? {} : { results: [] }) });
@@ -22,6 +25,7 @@ beforeEach(() => {
   api.getGame.mockResolvedValue(reply({ ...newGame(), score: practice.score }));
   api.getPracticeGame.mockImplementation(async () => reply(practice));
   api.startPracticeGame.mockImplementation(async () => reply(practice));
+  api.getThemes.mockResolvedValue(themes);
 });
 async function mount() { let view; await act(async () => { view = renderHook(useGame); }); return view; }
 
@@ -95,4 +99,53 @@ it('accepts practice API responses without daily results and preserves HTTP stat
   expect((await real.getPracticeGame(id)).game.id).toBe(id);
   fetch.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: 'Missing' }) });
   await expect(real.getPracticeGame(id)).rejects.toMatchObject({ status: 404 });
+});
+
+it('previews a chosen theme, starts explicitly, and supports replay and returning to daily', async () => {
+  await act(async () => render(<App />));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Practice' })));
+  const picker = screen.getByRole('dialog', { name: 'Choose practice' });
+  fireEvent.change(within(picker).getByLabelText('Theme'), { target: { value: 'space' } });
+  expect(within(picker).getByRole('radio', { name: 'Name 5 solar system planets' })).toBeChecked();
+  expect(api.startPracticeGame).not.toHaveBeenCalled();
+  practice = { ...practice, challenge: { ...practice.challenge, ...themes[1].challenges[0], category: 'Space' } };
+  let resolveStart;
+  api.startPracticeGame.mockImplementationOnce(() => new Promise(resolve => { resolveStart = resolve; }));
+  await act(async () => fireEvent.click(within(picker).getByRole('button', { name: 'Start practice' })));
+  expect(within(picker).getByRole('button', { name: 'Starting…' })).toBeDisabled();
+  await act(async () => resolveStart(reply(practice)));
+  expect(api.startPracticeGame).toHaveBeenCalledWith('solar-system-planets', expect.any(AbortSignal));
+  expect(screen.queryByRole('dialog', { name: 'Choose practice' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'Practice' })).toBeDisabled();
+  const finished = { ...practice, status: 'finished', finishedAt: Date.now(), answers: ['Earth', 'Mars', 'Venus', 'Jupiter', 'Saturn'],
+    score: { correctness: 500, speed: 250, total: 750 } };
+  api.submitPracticeAnswer.mockResolvedValue(reply(finished, true));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), { target: { value: 'Saturn' } });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Submit answer' })));
+  expect(screen.queryByText(/Next challenge in/)).not.toBeInTheDocument();
+  practice = { ...practice, id: id.slice(0, -1) + '2', answers: [], startedAt: Date.now() };
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Play again' })));
+  expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('');
+  expect(getPracticeId()).toBe(practice.id);
+  api.getPracticeGame.mockResolvedValue(reply({ ...finished, id: practice.id }));
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Daily challenge' })));
+  expect(getPracticeId()).toBeNull();
+  expect(screen.getByRole('button', { name: 'Start challenge' })).toBeEnabled();
+});
+
+it('retries failed theme loading and preserves the picker after a failed start', async () => {
+  api.getThemes.mockRejectedValueOnce(new Error('Themes offline'));
+  api.startPracticeGame.mockRejectedValueOnce(new Error('Start offline'));
+  await act(async () => render(<App />));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Practice' })));
+  expect(screen.getByText('Themes offline')).toBeVisible();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Retry themes' })));
+  const picker = screen.getByRole('dialog', { name: 'Choose practice' });
+  await act(async () => fireEvent.click(within(picker).getByRole('button', { name: 'Start practice' })));
+  expect(within(picker).getByRole('alert')).toHaveTextContent('Start offline');
+  expect(within(picker).getByRole('button', { name: 'Start practice' })).toBeEnabled();
+  await act(async () => fireEvent.click(within(picker).getByRole('button', { name: 'Start practice' })));
+  expect(screen.queryByRole('dialog', { name: 'Choose practice' })).not.toBeInTheDocument();
 });

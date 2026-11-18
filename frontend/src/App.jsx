@@ -4,6 +4,7 @@ import Dialog from './components/Dialog.jsx';
 import AnswerSlots from './features/game/AnswerSlots.jsx';
 import Countdown from './features/game/Countdown.jsx';
 import Results from './features/game/Results.jsx';
+import PracticePicker from './features/game/PracticePicker.jsx';
 import { MAX_ANSWER_LENGTH, POINTS_PER_ANSWER, POINTS_PER_SECOND } from '../../shared/gameRules.mjs';
 import { getResults, getStatistics } from './features/game/storage.js';
 import useGame from './features/game/useGame.js';
@@ -22,23 +23,27 @@ export default function App() {
 }
 
 function GameApp() {
-  const { game, now, remaining, feedback, pending, error, refresh, start, submit } = useGame();
+  const { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily } = useGame();
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);
   const inputRef = useRef(null);
   const { challenge, status, answers } = game ?? { challenge: null, status: 'loading', answers: [] };
   const playing = status === 'playing';
   const finished = status === 'finished';
+  const practice = game?.mode === 'practice';
   const statistics = useMemo(() => getStatistics(getResults()), [game]);
   // Sąsaja rodo serverio patvirtintus taškus ir užduoties tekstą.
   const liveScore = game?.score.correctness ?? 0;
   const prompt = challenge?.prompt;
 
   useEffect(() => {
-    if (playing && !pending) inputRef.current?.focus();
-  }, [playing, pending]);
+    if (playing && !pending && !dialog) inputRef.current?.focus();
+  }, [playing, pending, dialog]);
 
-  useEffect(() => { setAnswer(''); }, [challenge?.date]);
+  useEffect(() => {
+    setAnswer('');
+    if (game?.mode === 'practice') setDialog(current => current === 'practice' ? null : current);
+  }, [game?.id, game?.mode, challenge?.date]);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -61,6 +66,7 @@ function GameApp() {
       <header className="site-header">
         <a href="/" className="wordmark" aria-label="Quintle home">quintle</a>
         <nav className="header-actions" aria-label="Game information">
+          <button type="button" className="text-button" disabled={playing || pending} onClick={() => setDialog('practice')}>Practice</button>
           <button type="button" className="icon-button" aria-label="How to play" onClick={() => setDialog('help')}>
             <CircleHelp size={18} />
           </button>
@@ -72,11 +78,11 @@ function GameApp() {
 
       <main className="main-content">
         <div className="challenge-meta">
-          <span title={'Challenge for ' + challenge.date + ' UTC'}>Daily #{String(challenge.number).padStart(3, '0')}</span>
+          <span title={'Challenge for ' + challenge.date + ' UTC'}>{practice ? 'Practice' : `Daily #${String(challenge.number).padStart(3, '0')}`}</span>
           <span>{challenge.category}</span>
         </div>
 
-        {finished ? <Results key={challenge.date} game={game} remaining={remaining} now={now} /> : (
+        {finished ? <Results key={game.id ?? challenge.date} game={game} remaining={remaining} now={now} /> : (
           <section className="game-screen" aria-labelledby="challenge-title">
             <div className="challenge-heading">
               <Countdown remaining={remaining} status={status} />
@@ -114,12 +120,18 @@ function GameApp() {
           </section>
         )}
 
+        {practice && finished && <div className="practice-actions">
+          <button type="button" className="primary-button" disabled={pending} onClick={() => startPractice(challenge.id)}>Play again</button>
+          <button type="button" className="text-button" disabled={pending} onClick={showDaily}>Daily challenge</button>
+          {error && <p role="alert">{error}</p>}
+        </div>}
         <footer className="game-footer">
-          <span>A new challenge every day at 00:00 UTC</span>
+          <span>{practice ? 'Practice leaves your daily streak unchanged' : 'A new challenge every day at 00:00 UTC'}</span>
           <button type="button" className="text-button" onClick={() => setDialog('help')}>How to play</button>
         </footer>
       </main>
 
+      {dialog === 'practice' && <PracticePicker pending={pending} error={error} onStart={startPractice} onClose={() => setDialog(null)} />}
       <Dialog open={dialog === 'help'} title="How to play" onClose={() => setDialog(null)}>
         <p className="dialog-intro">Five answers. Thirty seconds. One daily challenge.</p>
         <ol className="how-to-list">
