@@ -4,6 +4,23 @@ import { it } from 'node:test';
 import { createApp } from '../src/app.ts';
 import { getPracticeChallenge, getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
+import { createRandomRound } from '../src/randomRound.ts';
+
+it('builds five single-answer prompts from five different themes in one random round', () => {
+  for (let round = 0; round < 24; round += 1) {
+    const questions = createRandomRound();
+    assert.equal(questions.length, 5);
+    assert.equal(new Set(questions.map(question => question.theme)).size, 5);
+    assert.equal(new Set(questions.map(question => question.id)).size, 5);
+    for (const question of questions) {
+      assert.match(question.prompt, /^Name one example: /);
+      assert.deepEqual(question.answers, getPracticeChallenge(question.id)!.answers);
+    }
+    const first = questions[0];
+    first.answers[0][0] = 'Changed snapshot';
+    assert.notEqual(getPracticeChallenge(first.id)!.answers[0][0], 'Changed snapshot');
+  }
+});
 
 it('provides distinct themes and stable challenges with at least five valid answers', () => {
   const themes = getPracticeThemes();

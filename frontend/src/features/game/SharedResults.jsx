@@ -13,7 +13,7 @@ export default function SharedResults({ result }) {
       </header>
       <main className="main-content">
         {game ? <>
-          <div className="challenge-meta"><span>{practice ? 'Practice' : `Daily #${String(game.challenge.number).padStart(3, '0')}`} · {game.challenge.date}</span><span>{game.challenge.category}</span></div>
+          <div className="challenge-meta"><span>{game.variant === 'random' ? 'Random' : practice ? 'Practice' : `Daily #${String(game.challenge.number).padStart(3, '0')}`} · {game.challenge.date}</span><span>{game.challenge.category}</span></div>
           {game.challenge.prompt && <p className="dialog-intro">{game.challenge.prompt}</p>}
           <Results game={game} remaining={GAME_DURATION - (game.finishedAt - game.startedAt)} shared />
         </> : <section className="results-screen" role="alert">

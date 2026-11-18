@@ -83,6 +83,11 @@ export function createApp(play: ReturnType<typeof createGameService>, practice?:
     next();
   });
   app.get('/api/game/themes', (_request, response) => response.json({ themes: getPracticeThemes() }));
+  app.post('/api/game/practice/random/start', async (request, response) => {
+    if (Object.keys(request.body).length) return response.status(400).json({ error: 'Random start does not accept game data.' });
+    if (!practice) return response.status(503).json({ error: 'Practice is unavailable.' });
+    response.json(await practice(playerHash(request, response), 'random', ''));
+  });
   app.post('/api/game/practice/start', async (request, response) => {
     const { challengeId } = request.body;
     if (Object.keys(request.body).some(key => key !== 'challengeId') || typeof challengeId !== 'string' || !getPracticeChallenge(challengeId)) {
@@ -97,13 +102,14 @@ export function createApp(play: ReturnType<typeof createGameService>, practice?:
     response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
   });
   app.post('/api/game/practice/:sessionId/answers', async (request, response) => {
-    const { answer } = request.body;
-    if (Object.keys(request.body).some(key => key !== 'answer') || typeof answer !== 'string' || !answer.trim() || answer.length > MAX_ANSWER_LENGTH) {
+    const { answer, questionId } = request.body;
+    if (Object.keys(request.body).some(key => !['answer', 'questionId'].includes(key)) || typeof answer !== 'string' || !answer.trim() || answer.length > MAX_ANSWER_LENGTH
+      || (questionId !== undefined && (typeof questionId !== 'string' || !/^[a-z0-9-]{1,80}$/.test(questionId)))) {
       return response.status(400).json({ error: `Send one answer of up to ${MAX_ANSWER_LENGTH} characters.` });
     }
     if ([...normalizeAnswer(answer)].length > 255) return response.status(400).json({ error: 'Answer is too long after normalization.' });
     if (!practice) return response.status(503).json({ error: 'Practice is unavailable.' });
-    const result = await practice(playerHash(request, response), 'answer', request.params.sessionId as string, answer);
+    const result = await practice(playerHash(request, response), 'answer', request.params.sessionId as string, answer, questionId);
     response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
   });
   app.get('/api/game', async (request, response) => response.json(await play(playerHash(request, response), 'read')));

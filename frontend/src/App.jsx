@@ -24,17 +24,15 @@ export default function App() {
 
 function GameApp() {
   const { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily,
-    randomRun, startRandom, nextRandom } = useGame();
+    startRandom } = useGame();
   const [answer, setAnswer] = useState('');
   const [dialog, setDialog] = useState(null);
   const inputRef = useRef(null);
-  const advancedRandomRef = useRef(null);
   const { challenge, status, answers } = game ?? { challenge: null, status: 'loading', answers: [] };
   const playing = status === 'playing';
   const finished = status === 'finished';
   const practice = game?.mode === 'practice';
-  const random = practice && randomRun?.sessionId === game.id ? randomRun : null;
-  const randomComplete = random && random.index === random.ids.length - 1;
+  const random = practice && game?.variant === 'random';
   const statistics = useMemo(() => getStatistics(getResults()), [game]);
   // Sąsaja rodo serverio patvirtintus taškus ir užduoties tekstą.
   const liveScore = game?.score.correctness ?? 0;
@@ -48,12 +46,6 @@ function GameApp() {
     setAnswer('');
     if (game?.mode === 'practice') setDialog(current => current === 'practice' ? null : current);
   }, [game?.id, game?.mode, challenge?.date]);
-
-  useEffect(() => {
-    if (!random || !finished || randomComplete || pending || advancedRandomRef.current === game.id) return;
-    advancedRandomRef.current = game.id;
-    void nextRandom();
-  }, [random, finished, randomComplete, pending, game?.id, nextRandom]);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -77,7 +69,7 @@ function GameApp() {
         <a href="/" className="wordmark" aria-label="Quintle home">quintle</a>
         <nav className="header-actions" aria-label="Game information">
           <button type="button" className="text-button" disabled={playing || pending} onClick={startRandom}
-            title="Play five questions from five different themes">Random</button>
+            title="Five themes. One answer per theme. One 30-second round.">Random</button>
           <button type="button" className="text-button" disabled={playing || pending} onClick={() => setDialog('practice')}>Practice</button>
           <button type="button" className="icon-button" aria-label="How to play" onClick={() => setDialog('help')}>
             <CircleHelp size={18} />
@@ -90,7 +82,7 @@ function GameApp() {
 
       <main className="main-content">
         <div className="challenge-meta">
-          <span title={'Challenge for ' + challenge.date + ' UTC'}>{random ? `Random ${random.index + 1} / ${random.ids.length}`
+          <span title={'Challenge for ' + challenge.date + ' UTC'}>{random ? `Random · ${answers.length} / 5`
             : practice ? 'Practice' : `Daily #${String(challenge.number).padStart(3, '0')}`}</span>
           <span>{challenge.category}</span>
         </div>
@@ -102,7 +94,7 @@ function GameApp() {
                 <>
                   <Countdown remaining={remaining} status={status} />
                   <h1 id="challenge-title">{prompt}</h1>
-                  <p>Be quick. Be accurate. Think differently.</p>
+                  <p>{random ? 'One answer per question. Five themes. One timer.' : 'Be quick. Be accurate. Think differently.'}</p>
                 </>
               ) : (
                 <>
@@ -116,7 +108,7 @@ function GameApp() {
               )}
             </div>
 
-            <AnswerSlots answers={answers} status={status} challengeDate={challenge.date} />
+            <AnswerSlots answers={answers} status={status} challengeDate={challenge.date} questions={game.questions} />
 
             <div className="entry-area">
               <form className="answer-form" onSubmit={onSubmit} noValidate>
@@ -147,10 +139,9 @@ function GameApp() {
         )}
 
         {practice && finished && <div className="practice-actions">
-          {randomComplete && <p role="status">Random run complete · {random.ids.length} of {random.ids.length} questions</p>}
           <button type="button" className="primary-button" disabled={pending}
-            onClick={random ? randomComplete ? startRandom : nextRandom : () => startPractice(challenge.id)}>
-            {random ? randomComplete ? 'Play another random set' : 'Next random question' : 'Play again'}
+            onClick={random ? startRandom : () => startPractice(challenge.id)}>
+            {random ? 'Play another random round' : 'Play again'}
           </button>
           <button type="button" className="text-button" disabled={pending} onClick={showDaily}>Daily challenge</button>
           {error && <p role="alert">{error}</p>}

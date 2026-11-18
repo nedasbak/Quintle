@@ -23,6 +23,12 @@ async function request(path, signal, body) {
       || !Number.isFinite(data.serverNow) || (practice ? data.game.mode !== 'practice' || typeof data.game.id !== 'string' : !Array.isArray(data.results))) {
       throw new Error('The game server returned an invalid response.');
     }
+    if (data.game.variant === 'random' && (!Array.isArray(data.game.questions) || data.game.questions.length !== 5
+      || !data.game.questions.every(question => question && typeof question.id === 'string' && typeof question.prompt === 'string' && question.prompt.trim()
+        && typeof question.category === 'string' && typeof question.theme === 'string')
+      || new Set(data.game.questions.map(question => question.theme)).size !== 5)) {
+      throw new Error('The game server returned invalid random questions.');
+    }
     return data;
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -39,4 +45,6 @@ export const submitAnswer = (answer, signal) => request('/answers', signal, { an
 export const getThemes = signal => request('/themes', signal);
 export const getPracticeGame = (id, signal) => request(`/practice/${encodeURIComponent(id)}`, signal);
 export const startPracticeGame = (challengeId, signal) => request('/practice/start', signal, { challengeId });
-export const submitPracticeAnswer = (id, answer, signal) => request(`/practice/${encodeURIComponent(id)}/answers`, signal, { answer });
+export const startRandomGame = signal => request('/practice/random/start', signal, {});
+export const submitPracticeAnswer = (id, answer, signal, questionId) => request(`/practice/${encodeURIComponent(id)}/answers`, signal,
+  { answer, ...(questionId ? { questionId } : {}) });

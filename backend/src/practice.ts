@@ -3,6 +3,8 @@ import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
 import { calculateScore, MAX_ANSWERS } from '../../shared/gameRules.mjs';
 import { getDailyChallenge, validateAnswer } from '../../shared/challenges.mjs';
+import { createRandomRound } from './randomRound.ts';
+import type { RandomQuestion } from './randomRound.ts';
 
 interface PracticeSession extends RowDataPacket {
   id: string;
@@ -11,7 +13,7 @@ interface PracticeSession extends RowDataPacket {
   category: string;
   prompt: string;
   answers: string[];
-  answer_keys: string[][];
+  answer_keys: string[][] | RandomQuestion[];
   started_at: Date;
   finished_at: Date | null;
   status: 'active' | 'completed' | 'expired';
@@ -19,9 +21,12 @@ interface PracticeSession extends RowDataPacket {
 }
 
 export function createPracticeService(pool: Pool, clock: () => number = Date.now) {
-  return async (tokenHash: Buffer, action: 'start' | 'read' | 'answer', input: string, answer?: string) => {
-    const challenge = action === 'start' ? getPracticeChallenge(input) : null;
-    if (action === 'start' && !challenge) throw new Error('Unknown practice challenge.');
+  return async (tokenHash: Buffer, action: 'start' | 'random' | 'read' | 'answer', input: string, answer?: string, questionId?: string) => {
+    const starting = action === 'start' || action === 'random';
+    const challenge = action === 'random' ? { id: 'random', theme: 'random', category: 'Mixed themes',
+      prompt: 'Five questions. Five themes. One round.', answers: createRandomRound() }
+      : action === 'start' ? getPracticeChallenge(input) : null;
+    if (starting && !challenge) throw new Error('Unknown practice challenge.');
     const connection = await pool.getConnection();
     try {
       await connection.query("SET time_zone = '+00:00'");
@@ -33,7 +38,7 @@ export function createPracticeService(pool: Pool, clock: () => number = Date.now
       await connection.execute("UPDATE practice_sessions SET status = 'expired', finished_at = expires_at WHERE player_id = ? AND status = 'active' AND expires_at <= ?",
         [player.id, new Date(now)]);
       let id = input;
-      if (action === 'start') {
+      if (starting) {
         const [[active]] = await connection.execute<RowDataPacket[]>("SELECT id FROM practice_sessions WHERE player_id = ? AND status = 'active' FOR UPDATE", [player.id]);
         id = active?.id ?? randomUUID();
         if (!active) await connection.execute(`INSERT INTO practice_sessions
@@ -46,8 +51,12 @@ export function createPracticeService(pool: Pool, clock: () => number = Date.now
       if (action === 'answer' && session) {
         if (session.status !== 'active') {
           feedback = { kind: 'error', text: session.status === 'expired' ? 'Time is up. That answer arrived too late.' : 'This practice round has already finished.' };
+        } else if (session.theme === 'random' && questionId !== (session.answer_keys as RandomQuestion[])[session.answers.length].id) {
+          feedback = { kind: 'error', text: 'The question has changed. Answer the current question.' };
         } else {
-          const result = validateAnswer({ answers: session.answer_keys }, answer ?? '', session.answers);
+          const keys = session.theme === 'random'
+            ? (session.answer_keys as RandomQuestion[])[session.answers.length].answers : session.answer_keys as string[][];
+          const result = validateAnswer({ answers: keys }, answer ?? '', session.answers);
           if (result.error) feedback = { kind: 'error', text: result.error };
           else {
             const answers = [...session.answers, result.answer];
@@ -62,10 +71,15 @@ export function createPracticeService(pool: Pool, clock: () => number = Date.now
       }
       const correctness = calculateScore(session?.answers.length ?? 0, 0);
       const total = Number(session?.score ?? 0);
+      const questions = session?.theme === 'random' ? (session.answer_keys as RandomQuestion[])
+        .map(({ id, theme, category, prompt }) => ({ id, theme, category, prompt })) : null;
+      const currentQuestion = session?.status === 'active' ? questions?.[session.answers.length] : null;
       const game = session ? {
         id: session.id, mode: 'practice',
-        challenge: { id: session.challenge_key, theme: session.theme, category: session.category,
-          prompt: session.prompt as string, date: session.started_at.toISOString().slice(0, 10), number: getDailyChallenge(session.started_at.getTime()).number },
+        ...(questions ? { variant: 'random', questions } : {}),
+        challenge: { id: session.challenge_key, theme: currentQuestion?.theme ?? session.theme,
+          category: currentQuestion?.category ?? session.category,
+          prompt: currentQuestion?.prompt ?? session.prompt, date: session.started_at.toISOString().slice(0, 10), number: getDailyChallenge(session.started_at.getTime()).number },
         status: session.status === 'active' ? 'playing' : 'finished', answers: session.answers,
         startedAt: session.started_at.getTime(), finishedAt: session.finished_at?.getTime() ?? null,
         score: { correctness, speed: total - correctness, total },

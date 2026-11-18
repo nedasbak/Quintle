@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GAME_DURATION, getDailyChallenge, remainingTime } from './challenges.js';
-import { getGame, startGame, submitAnswer, getPracticeGame, startPracticeGame, submitPracticeAnswer, getThemes } from './api.js';
+import { getGame, startGame, submitAnswer, getPracticeGame, startPracticeGame, submitPracticeAnswer, startRandomGame } from './api.js';
 import { getPracticeId, savePracticeId, saveServerResults } from './storage.js';
-import { pickRandomQuestions, readRandomRun, saveRandomRun } from './randomPractice.js';
 
 export default function useGame() {
   const [game, setGame] = useState(null);
-  const [randomRun, setRandomRun] = useState(readRandomRun);
   const gameRef = useRef(null);
   const [now, setNow] = useState(Date.now);
   const [pending, setPending] = useState(false);
@@ -17,7 +15,7 @@ export default function useGame() {
   const nextRefreshRef = useRef(0);
 
   // Nauja būsena priimama tik iš serverio; tuo pat metu siunčiama viena užklausa.
-  const run = useCallback(async (operation, onSuccess) => {
+  const run = useCallback(async operation => {
     if (requestRef.current) return false;
     const controller = new AbortController();
     requestRef.current = controller;
@@ -31,7 +29,6 @@ export default function useGame() {
       setNow(response.serverNow);
       if (response.game.mode !== 'practice') saveServerResults(response.results);
       savePracticeId(response.game.mode === 'practice' ? response.game.id : null);
-      onSuccess?.(response.game);
       setGame(response.game);
       setFeedback(response.feedback);
       setError('');
@@ -46,14 +43,6 @@ export default function useGame() {
       }
     }
   }, []);
-  const updateRandomRun = useCallback(value => {
-    saveRandomRun(value);
-    setRandomRun(value);
-  }, []);
-  useEffect(() => {
-    if (game && randomRun && (game.mode !== 'practice' || game.id !== randomRun.sessionId
-      || game.challenge.id !== randomRun.ids[randomRun.index])) updateRandomRun(null);
-  }, [game, randomRun, updateRandomRun]);
   const refresh = useCallback(() => run(async signal => {
     const current = gameRef.current;
     const id = current ? current.mode === 'practice' ? current.id : null : getPracticeId();
@@ -104,31 +93,18 @@ export default function useGame() {
   // Dvigubas paspaudimas nepradeda naujo bandymo ir nepateikia atsakymo antrą kartą.
   const start = () => gameRef.current?.status === 'ready' ? run(startGame) : Promise.resolve(false);
   const startPractice = id => gameRef.current?.status !== 'playing'
-    ? run(signal => startPracticeGame(id, signal), () => updateRandomRun(null)) : Promise.resolve(false);
+    ? run(signal => startPracticeGame(id, signal)) : Promise.resolve(false);
   const showDaily = () => gameRef.current?.status !== 'playing'
-    ? run(getGame, () => updateRandomRun(null)) : Promise.resolve(false);
-  const startRandom = () => {
-    if (gameRef.current?.status === 'playing') return Promise.resolve(false);
-    let ids;
-    return run(async signal => {
-      ids = pickRandomQuestions(await getThemes(signal));
-      return startPracticeGame(ids[0], signal);
-    }, next => updateRandomRun(next.mode === 'practice' && next.challenge.id === ids[0]
-      ? { ids, index: 0, sessionId: next.id } : null));
-  };
-  const nextRandom = () => {
-    if (!randomRun || gameRef.current?.id !== randomRun.sessionId || gameRef.current?.status !== 'finished'
-      || randomRun.index >= randomRun.ids.length - 1) return Promise.resolve(false);
-    const index = randomRun.index + 1;
-    return run(signal => startPracticeGame(randomRun.ids[index], signal), next =>
-      updateRandomRun(next.mode === 'practice' && next.challenge.id === randomRun.ids[index]
-        ? { ...randomRun, index, sessionId: next.id } : null));
-  };
+    ? run(getGame) : Promise.resolve(false);
+  const startRandom = () => gameRef.current?.status !== 'playing' ? run(startRandomGame) : Promise.resolve(false);
   const submit = answer => gameRef.current?.status === 'playing' ? run(signal => gameRef.current.mode === 'practice'
-    ? submitPracticeAnswer(gameRef.current.id, answer, signal) : submitAnswer(answer, signal)) : Promise.resolve(false);
+    ? gameRef.current.variant === 'random'
+      ? submitPracticeAnswer(gameRef.current.id, answer, signal, gameRef.current.questions[gameRef.current.answers.length].id)
+      : submitPracticeAnswer(gameRef.current.id, answer, signal)
+    : submitAnswer(answer, signal)) : Promise.resolve(false);
   const remaining = !game || game.startedAt === null ? GAME_DURATION
     : remainingTime(game.startedAt, game.status === 'finished' ? game.finishedAt : now);
 
   return { game, now, remaining, feedback, pending, error, refresh, start, submit, startPractice, showDaily,
-    randomRun, startRandom, nextRandom };
+    startRandom };
 }

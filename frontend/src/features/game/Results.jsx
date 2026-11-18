@@ -23,7 +23,7 @@ export default function Results({ game, remaining, now, shared = false }) {
 
   async function shareResult() {
     const blocks = Array.from({ length: 5 }, (_, index) => index < answers.length ? '🟩' : '⬛').join('');
-    const title = practice ? 'Quintle practice' : `Quintle #${String(challenge.number).padStart(3, '0')}`;
+    const title = game.variant === 'random' ? 'Quintle random' : practice ? 'Quintle practice' : `Quintle #${String(challenge.number).padStart(3, '0')}`;
     const text = `${title} · ${challenge.date}\n${blocks}\n${answers.length}/5 · ${score.total} points\nFive answers. Thirty seconds.\n${resultLink}`;
     try {
       await navigator.clipboard.writeText(text);
@@ -52,7 +52,7 @@ export default function Results({ game, remaining, now, shared = false }) {
       {shared && <button type="button" className="text-button" aria-expanded={showAnswers} aria-controls="result-answers" onClick={() => setShowAnswers(!showAnswers)}>{showAnswers ? 'Hide answers' : 'Show answers (spoilers)'}</button>}
       {showAnswers && <div id="result-answers">
       <div className="results-list-heading"><h2>{shared ? 'Match answers' : 'Your answers'}</h2><span>Points · rarity preview</span></div>
-      <AnswerSlots answers={answers} status="finished" challengeDate={challenge.date} />
+      <AnswerSlots answers={answers} status="finished" challengeDate={challenge.date} questions={game.questions} />
       </div>}
       <p className="rarity-disclaimer">Rarity uses sample pick rates for this preview, not live player data. Preview values do not change your score.</p>
 

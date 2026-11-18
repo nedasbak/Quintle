@@ -2,7 +2,7 @@ import { CircleCheck } from 'lucide-react';
 import { getAnswerDetails } from './scoring.js';
 import { MAX_ANSWERS, POINTS_PER_ANSWER } from '../../../../shared/gameRules.mjs';
 
-export default function AnswerSlots({ answers, status, challengeDate }) {
+export default function AnswerSlots({ answers, status, challengeDate, questions }) {
   const finished = status === 'finished';
 
   return (
@@ -12,9 +12,11 @@ export default function AnswerSlots({ answers, status, challengeDate }) {
         const details = answer ? getAnswerDetails(answer) : null;
         const current = status === 'playing' && index === answers.length;
         return (
-          <li key={`${challengeDate}-${index}`} className={`answer-slot ${answer ? 'slot-filled' : ''} ${current ? 'slot-current' : ''}`}>
+          <li key={`${challengeDate}-${index}`} aria-current={current ? 'step' : undefined}
+            className={`answer-slot ${answer ? 'slot-filled' : ''} ${current ? 'slot-current' : ''}`}>
             <span className="slot-icon" aria-hidden="true">{answer ? <CircleCheck size={16} /> : index + 1}</span>
             <div className="slot-content">
+              {questions?.[index] && <span className="slot-question">{questions[index].prompt}</span>}
               <span className="slot-answer">{answer || (finished ? 'No answer' : 'Waiting for answer…')}</span>
               {finished && details && <span className="answer-rarity">{details.label}{details.pickRate !== null && ` · ${details.pickRate}% sample pick rate`}</span>}
             </div>

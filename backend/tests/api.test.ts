@@ -993,4 +993,99 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(completed.score.correctness, 500);
     assert.deepEqual((await client.request()).data, before);
   });
+  it('validates one answer per theme within one random session, timer, and final score', async () => {
+    const client = player(), stranger = player();
+    const daily = (await client.request()).data;
+    for (const body of [{ challengeId: 'programming-languages' }, { questions: [] }, { score: 800 }]) {
+      assert.equal((await client.request('/practice/random/start', body)).status, 400);
+    }
+    const starts = await Promise.all([client.request('/practice/random/start', {}), client.request('/practice/random/start', {})]);
+    const initial = starts[0].data.game;
+    assert.equal(starts[0].status, 200);
+    assert.deepEqual(starts[1].data.game, initial);
+    assert.equal(initial.mode, 'practice');
+    assert.equal(initial.variant, 'random');
+    assert.equal(initial.questions.length, 5);
+    assert.equal(new Set(initial.questions.map((question: any) => question.theme)).size, 5);
+    assert.deepEqual(initial.answers, []);
+    assert.equal(JSON.stringify(initial).includes('answer_keys'), false);
+    assert.equal(initial.questions.some((question: any) => 'answers' in question), false);
+    assert.equal((await stranger.request(`/practice/${initial.id}`)).status, 404);
+    const guess = (answer: string, index = 0) => client.request(`/practice/${initial.id}/answers`, { answer, questionId: initial.questions[index].id });
+    assert.equal((await guess('not-a-real-answer-123456789')).data.accepted, false);
+    let completed = initial;
+    const credited: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const challenge = getPracticeChallenge(initial.questions[index].id)!;
+      const candidate = challenge.answers.find((variants: string[]) => !credited.includes(variants[0]))![0];
+      now = initial.startedAt + (index + 1) * 1000;
+      const submissions = await Promise.all([guess(candidate, index), guess(candidate, index)]);
+      assert.equal(submissions.filter(response => response.data.accepted).length, 1);
+      const accepted = submissions.find(response => response.data.accepted)!.data.game;
+      credited.push(candidate);
+      assert.deepEqual(accepted.answers, credited);
+      assert.equal(accepted.id, initial.id);
+      assert.equal(accepted.startedAt, initial.startedAt);
+      assert.equal(accepted.status, index === 4 ? 'finished' : 'playing');
+      if (index < 4) {
+        assert.equal(accepted.challenge.prompt, initial.questions[index + 1].prompt);
+        assert.equal(accepted.challenge.category, initial.questions[index + 1].category);
+        assert.deepEqual((await client.request('/practice/random/start', {})).data.game, accepted);
+        assert.deepEqual((await client.request(`/practice/${initial.id}`)).data.game, accepted);
+      }
+      completed = accepted;
+    }
+    assert.deepEqual(completed.score, { correctness: 500, speed: 250, total: 750 });
+    const [[stored]] = await pool.execute<RowDataPacket[]>('SELECT answers, score, started_at, finished_at FROM practice_sessions WHERE id = ?', [initial.id]);
+    assert.deepEqual(stored.answers, credited);
+    assert.equal(stored.score, 750);
+    assert.equal(stored.finished_at.getTime() - stored.started_at.getTime(), 5000);
+    const dailyAfter = (await client.request()).data;
+    assert.deepEqual(dailyAfter.game, daily.game);
+    assert.deepEqual(dailyAfter.results, daily.results);
+    const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE token_hash = ?', [client.hash]);
+    assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
+  });
+
+  it('expires the whole mixed-theme round on the original deadline and allows a fresh replay', async () => {
+    const client = player();
+    const game = (await client.request('/practice/random/start', {})).data.game;
+    const candidate = getPracticeChallenge(game.questions[0].id)!.answers[0][0];
+    now = game.startedAt + 1000;
+    const first = (await client.request(`/practice/${game.id}/answers`, { answer: candidate, questionId: game.questions[0].id })).data.game;
+    assert.deepEqual(first.answers, [candidate]);
+    now = game.startedAt + GAME_DURATION;
+    const expired = (await client.request(`/practice/${game.id}`)).data.game;
+    assert.equal(expired.status, 'finished');
+    assert.equal(expired.finishedAt, game.startedAt + GAME_DURATION);
+    assert.deepEqual(expired.score, { correctness: 100, speed: 0, total: 100 });
+    assert.deepEqual(expired.questions, game.questions);
+    assert.equal((await client.request(`/practice/${game.id}/answers`, { answer: candidate })).data.accepted, false);
+    const replay = (await client.request('/practice/random/start', {})).data.game;
+    assert.notEqual(replay.id, game.id);
+    assert.equal(replay.startedAt, now);
+    assert.deepEqual(replay.answers, []);
+    assert.equal(replay.variant, 'random');
+  });
+
+  it('keeps mixed-theme answer validation and prompts in the saved server snapshot', async () => {
+    const client = player();
+    const game = (await client.request('/practice/random/start', {})).data.game;
+    const [[stored]] = await pool.execute<RowDataPacket[]>('SELECT answer_keys FROM practice_sessions WHERE id = ?', [game.id]);
+    const snapshot = stored.answer_keys;
+    snapshot[0].answers = [['Private accepted value'], ['First extra A'], ['First extra B'], ['First extra C'], ['First extra D']];
+    snapshot[1].prompt = 'Name one saved test answer';
+    snapshot[1].answers = [['StoredSecond'], ['Second extra A'], ['Second extra B'], ['Second extra C'], ['Second extra D']];
+    await pool.execute('UPDATE practice_sessions SET answer_keys = ? WHERE id = ?', [JSON.stringify(snapshot), game.id]);
+    now = game.startedAt + 500;
+    const first = (await client.request(`/practice/${game.id}/answers`, { answer: 'Private accepted value', questionId: game.questions[0].id })).data;
+    assert.equal(first.accepted, true);
+    assert.equal(first.game.challenge.prompt, 'Name one saved test answer');
+    assert.equal(first.game.startedAt, game.startedAt);
+    assert.equal(JSON.stringify(first.game).includes('Private accepted value'), true);
+    assert.equal(JSON.stringify(first.game.questions).includes('StoredSecond'), false);
+    const second = (await client.request(`/practice/${game.id}/answers`, { answer: 'StoredSecond', questionId: game.questions[1].id })).data;
+    assert.equal(second.accepted, true);
+    assert.deepEqual(second.game.answers, ['Private accepted value', 'StoredSecond']);
+  });
 });

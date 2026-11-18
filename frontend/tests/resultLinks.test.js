@@ -11,6 +11,25 @@ const game = {
 const baseUrl = 'https://quintle.example/play/?tracking=remove#old';
 const encode = (payload) => '#results=' + btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+it('shares one mixed-theme round with five question labels and no private answer lists', () => {
+  const questions = Array.from({ length: 5 }, (_, index) => ({ id: `private-id-${index}`, theme: `theme-${index}`,
+    category: `Category ${index}`, prompt: `Name one example: category ${index}`, answers: [['private-answer-list']] }));
+  const random = { ...game, mode: 'practice', variant: 'random', id: 'private-session', questions,
+    challenge: { ...game.challenge, category: 'Mixed themes', prompt: 'Five questions. Five themes. One round.' } };
+  const hash = new URL(createResultLink(random, baseUrl)).hash;
+  const restored = readResultLink(hash).game;
+  expect(restored.variant).toBe('random');
+  expect(restored.questions).toEqual(questions.map(({ theme, category, prompt }) => ({ theme, category, prompt })));
+  expect(restored.answers).toEqual(game.answers);
+  expect(restored.finishedAt - restored.startedAt).toBe(5049);
+  const payload = atob(hash.slice('#results='.length).replace(/-/g, '+').replace(/_/g, '/'));
+  for (const secret of ['private-id', 'private-session', 'private-answer-list']) expect(payload).not.toContain(secret);
+  for (const patch of [{ questions: questions.slice(0, 4) }, { questions: questions.map(question => ({ ...question, theme: 'same' })) },
+    { questions: questions.map(question => ({ ...question, prompt: '' })) }]) {
+    expect(readResultLink(encode({ ...JSON.parse(payload), ...patch }))).toEqual({ kind: 'invalid' });
+  }
+});
+
 describe('shareable result links', () => {
   it('round-trips the original challenge, answers, precise duration, and score', () => {
     const url = new URL(createResultLink(game, baseUrl));
