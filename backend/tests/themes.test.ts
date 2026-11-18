@@ -7,7 +7,7 @@ import { buildAnswerIndex, validateAnswer } from '../../shared/challenges.mjs';
 
 it('provides distinct themes and stable challenges with at least five valid answers', () => {
   const themes = getPracticeThemes();
-  assert.equal(themes.length, 6);
+  assert.equal(themes.length, 11);
   for (const theme of themes) assert.ok(theme.challenges.length >= 5, `${theme.name} needs at least five challenges.`);
   assert.equal(new Set(themes.map(theme => theme.id)).size, themes.length);
   const choices = themes.flatMap(theme => theme.challenges);
@@ -42,6 +42,23 @@ it('keeps new challenge boundaries and aliases consistent', () => {
   const units = getPracticeChallenge('si-base-units')!;
   assert.deepEqual(validateAnswer(units, 'meters', []), { answer: 'Metre' });
   assert.match(validateAnswer(units, 'meter', ['Metre']).error!, /already/i);
+});
+
+it('validates the new themes without conflating similar names or accepting out-of-scope answers', () => {
+  const cases = [
+    ['programming-languages', 'CPP', 'C++', 'HTML'],
+    ['ancient-civilizations', 'Harappans', 'Indus Valley', 'Inca'],
+    ['elements-starting-c', 'Cesium', 'Caesium', 'Oxygen'],
+    ['nolan-films-before-2025', 'Prestige', 'The Prestige', 'Avatar'],
+    ['minecraft-nether-biomes', 'Basalt Delta', 'Basalt Deltas', 'The End'],
+  ];
+  for (const [id, alias, canonical, invalid] of cases) {
+    const challenge = getPracticeChallenge(id)!;
+    assert.deepEqual(validateAnswer(challenge, alias, []), { answer: canonical });
+    assert.match(validateAnswer(challenge, invalid, []).error!, /try another/i);
+  }
+  assert.deepEqual(validateAnswer(getPracticeChallenge('programming-languages')!, 'CSharp', ['C', 'C++']), { answer: 'C#' });
+  assert.match(validateAnswer(getPracticeChallenge('first-ten-us-presidents')!, 'Adams', []).error!, /try another/i);
 });
 
 it('serves theme metadata without answers, player cookies, or a game request', async () => {
