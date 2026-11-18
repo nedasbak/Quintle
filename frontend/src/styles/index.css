@@ -128,6 +128,13 @@ h1 { margin: 0; font-size: clamp(1.125rem, 1rem + 0.5vw, 1.5rem); font-weight: 6
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .dialog-heading h2 { min-width: 0; font-size: clamp(1.125rem, 4vw, 1.3125rem); font-weight: 600; margin: 0; }
 .dialog-intro { font-size: 12px; line-height: 1.7; margin-top: 10px; color: #aebbc5; }
+.practice-picker { display: grid; gap: 1rem; }
+.practice-picker select { display: block; width: 100%; min-height: var(--tap-target-size); margin-top: 0.5rem; padding: 0.5rem; border: 1px solid #354047; border-radius: 8px; color: inherit; background: #242c31; }
+.practice-picker fieldset { display: grid; gap: 0.5rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.practice-picker legend { margin-bottom: 0.5rem; color: #aebbc5; }
+.practice-picker fieldset label { display: flex; align-items: center; gap: 0.75rem; min-height: var(--tap-target-size); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.practice-picker input { flex-shrink: 0; accent-color: var(--lime); }
+.practice-actions { display: grid; gap: 0.5rem; margin-top: 1rem; }
 .how-to-list { margin: 24px 0; padding-left: 20px; display: flex; flex-direction: column; gap: 18px; }
 .how-to-list li { padding-left: 3px; font-size: 13px; color: var(--lime); }
 .how-to-list strong { color: #e9eff2; font-weight: 500; }

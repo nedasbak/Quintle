@@ -6,6 +6,8 @@ services:
     container_name: quintle-frontend
     ports:
       - "5173:5173"
+    environment:
+      API_PROXY_TARGET: http://backend:3001
     depends_on:
       - backend
     networks:
@@ -21,6 +23,7 @@ services:
     environment:
       DATABASE_URL: mysql://quintle_user:quintle_password@mysql:3306/quintle
       PORT: 3001
+      HOST: 0.0.0.0
     depends_on:
       mysql:
         condition: service_healthy

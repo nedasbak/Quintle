@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -11,8 +11,10 @@ import { createPool } from 'mysql2/promise';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { createApp } from '../src/app.ts';
 import { createGameService } from '../src/game.ts';
+import { createPracticeService } from '../src/practice.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
 import { getDailyChallenge } from '../../shared/challenges.mjs';
+import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
 import { migrateSubmissionDetails } from '../database/migrations/010_submission_details.ts';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -29,7 +31,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
   const play = createGameService(pool, () => now);
 
   before(async () => {
-    server = createApp(play).listen(0, '127.0.0.1');
+    server = createApp(play, createPracticeService(pool, () => now)).listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing HTTP test address.');
@@ -397,6 +399,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     await pool.query('ALTER TABLE game_sessions ADD COLUMN legacy_player_id BIGINT UNSIGNED NULL');
     await pool.query('UPDATE game_sessions g JOIN players p ON p.id = g.player_id SET g.legacy_player_id = p.player_id');
     await pool.query('ALTER TABLE game_sessions DROP FOREIGN KEY fk_session_player');
+    await pool.query('ALTER TABLE practice_sessions DROP FOREIGN KEY fk_practice_player');
     await pool.query(`ALTER TABLE game_sessions DROP INDEX uq_session_player_day, DROP COLUMN player_id,
       CHANGE COLUMN legacy_player_id player_id BIGINT UNSIGNED NOT NULL,
       ADD UNIQUE KEY uq_session_player_day (player_id, challenge_date)`);
@@ -405,6 +408,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const migration = await readFile(new URL('../database/migrations/005_player_uuids.sql', import.meta.url), 'utf8');
     for (const statement of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(statement);
     await pool.query('ALTER TABLE game_sessions ADD UNIQUE KEY uq_session_player_challenge (player_id, challenge_id)');
+    await pool.query('ALTER TABLE practice_sessions ADD CONSTRAINT fk_practice_player FOREIGN KEY (player_id) REFERENCES players (id)');
     assert.deepEqual(await snapshot(), before);
     assert.deepEqual((await client.request()).data, original);
     const [players] = await pool.query<RowDataPacket[]>('SELECT id FROM players');
@@ -696,5 +700,171 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.equal(((await pool.query('SELECT * FROM current_challenge'))[0] as RowDataPacket[]).length, 1);
     assert.equal((await waiting.request()).data.game.status, 'ready');
     assert.equal((await waiting.request('/start', {})).data.game.status, 'playing');
+  });
+  it('migrates practice storage and permits replay without changing daily progress', async () => {
+    const [[fresh]] = await pool.query<RowDataPacket[]>('SHOW CREATE TABLE practice_sessions');
+    await pool.query('DROP TABLE practice_sessions');
+    const migration = await readFile(new URL('../database/migrations/019_practice_sessions.sql', import.meta.url), 'utf8');
+    const migrate = async () => {
+      for (const sql of migration.replace(/^--.*$/gm, '').split(';').filter(sql => sql.trim())) await pool.query(sql);
+    };
+    await migrate();
+    const [[upgraded]] = await pool.query<RowDataPacket[]>('SHOW CREATE TABLE practice_sessions');
+    assert.deepEqual(upgraded, fresh);
+    const client = player();
+    const daily = (await client.request()).data;
+    const [[owner]] = await pool.execute<RowDataPacket[]>('SELECT id FROM players WHERE token_hash = ?', [client.hash]);
+    const [dailyRows] = await pool.query('SELECT * FROM game_sessions ORDER BY id');
+    const challenge = getPracticeChallenge('dog-breeds')!;
+    const insert = (id: string) => pool.execute(`INSERT INTO practice_sessions
+      (id, player_id, challenge_key, theme, category, prompt, answer_keys, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, owner.id, challenge.id, challenge.theme, challenge.category, challenge.prompt, JSON.stringify(challenge.answers), '2026-11-18 23:59:58.000']);
+    const first = randomUUID();
+    await insert(first);
+    await assert.rejects(insert(randomUUID()), { code: 'ER_DUP_ENTRY' });
+    await assert.rejects(pool.execute('UPDATE practice_sessions SET player_id = ? WHERE id = ?',
+      [randomUUID(), first]), { code: 'ER_NO_REFERENCED_ROW_2' });
+    for (const change of ["answer_keys = JSON_ARRAY()", "answers = JSON_OBJECT()", "answers = JSON_ARRAY(1,2,3,4,5,6)",
+      "status = 'expired', finished_at = '2026-11-19 00:00:27.999'"]) {
+      await assert.rejects(pool.execute(`UPDATE practice_sessions SET ${change} WHERE id = ?`, [first]),
+        { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+    }
+    const answers = challenge.answers.slice(0, 5).map(variants => variants[0]);
+    await assert.rejects(pool.execute("UPDATE practice_sessions SET answers = ?, status = 'completed', finished_at = ? WHERE id = ?",
+      [JSON.stringify(answers), '2026-11-19 00:00:28.000', first]), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+    await pool.execute("UPDATE practice_sessions SET answers = ?, status = 'completed', finished_at = ? WHERE id = ?",
+      [JSON.stringify(answers), '2026-11-19 00:00:03.049', first]);
+    const [[solved]] = await pool.execute<RowDataPacket[]>('SELECT * FROM practice_sessions WHERE id = ?', [first]);
+    assert.equal(solved.correct_answers, 5);
+    assert.equal(solved.score, 749);
+    assert.equal(Number(solved.remaining_seconds), 24.951);
+    assert.deepEqual(solved.answer_keys, challenge.answers);
+    const second = randomUUID();
+    await insert(second);
+    await pool.execute("UPDATE practice_sessions SET answers = ?, status = 'expired', finished_at = expires_at WHERE id = ?",
+      [JSON.stringify(answers.slice(0, 2)), second]);
+    const [[expired]] = await pool.execute<RowDataPacket[]>('SELECT score FROM practice_sessions WHERE id = ?', [second]);
+    assert.equal(expired.score, 200);
+    await insert(randomUUID());
+    const [before] = await pool.query('SELECT * FROM practice_sessions ORDER BY id');
+    await migrate();
+    assert.deepEqual((await pool.query('SELECT * FROM practice_sessions ORDER BY id'))[0], before);
+    assert.deepEqual((await pool.query('SELECT * FROM game_sessions ORDER BY id'))[0], dailyRows);
+    assert.deepEqual((await client.request()).data, daily);
+    const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE id = ?', [owner.id]);
+    assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
+  });
+  it('starts and restores owned practice rounds without resetting timers or daily progress', async () => {
+    const client = player(), stranger = player();
+    const daily = (await client.request()).data;
+    for (const body of [{}, { challengeId: 'missing' }, { challengeId: 'dog-breeds', score: 800 }]) {
+      assert.equal((await client.request('/practice/start', body)).status, 400);
+    }
+    const [first, concurrent] = await Promise.all([
+      client.request('/practice/start', { challengeId: 'dog-breeds' }),
+      client.request('/practice/start', { challengeId: 'solar-system-planets' }),
+    ]);
+    assert.equal(first.status, 200);
+    assert.equal(concurrent.status, 200);
+    assert.deepEqual(concurrent.data.game, first.data.game);
+    const game = first.data.game;
+    assert.equal(game.mode, 'practice');
+    assert.equal(game.status, 'playing');
+    assert.equal(game.startedAt, now);
+    assert.deepEqual(game.answers, []);
+    assert.deepEqual(Object.keys(game).sort(), ['answers', 'challenge', 'finishedAt', 'id', 'mode', 'score', 'startedAt', 'status']);
+    assert.deepEqual(Object.keys(game.challenge).sort(), ['category', 'date', 'id', 'number', 'prompt', 'theme']);
+    assert.equal(Object.hasOwn(first.data, 'results'), false);
+    now += 5049;
+    const read = await client.request(`/practice/${game.id}`);
+    assert.deepEqual(read.data.game, game);
+    const [resumed, dailyRead] = await Promise.all([
+      client.request('/practice/start', { challengeId: 'countries-m' }), client.request(),
+    ]);
+    assert.equal(dailyRead.status, 200);
+    assert.deepEqual(dailyRead.data.game, daily.game);
+    assert.deepEqual(resumed.data.game, game);
+    assert.equal((await stranger.request(`/practice/${game.id}`)).status, 404);
+    assert.equal((await client.request(`/practice/${randomUUID()}`)).status, 404);
+    now = game.startedAt + GAME_DURATION;
+    const expired = await client.request(`/practice/${game.id}`);
+    assert.equal(expired.data.game.status, 'finished');
+    assert.equal(expired.data.game.finishedAt, now);
+    assert.equal(expired.data.game.score.total, 0);
+    const replay = await client.request('/practice/start', { challengeId: 'dog-breeds' });
+    assert.equal(replay.status, 200);
+    assert.notEqual(replay.data.game.id, game.id);
+    assert.equal(replay.data.game.startedAt, now);
+    assert.equal(replay.data.game.challenge.id, 'dog-breeds');
+    assert.deepEqual((await client.request(`/practice/${game.id}`)).data.game, expired.data.game);
+    const after = (await client.request()).data;
+    assert.deepEqual(after.game, daily.game);
+    assert.deepEqual(after.results, daily.results);
+  });
+  it('validates practice answers, scores completion, and isolates replays and daily statistics', async () => {
+    const client = player(), stranger = player();
+    const daily = (await client.request()).data;
+    const start = await client.request('/practice/start', { challengeId: 'dog-breeds' });
+    const { id, startedAt } = start.data.game;
+    const path = `/practice/${id}/answers`;
+    const guess = (answer: string, sessionId = id) => client.request(`/practice/${sessionId}/answers`, { answer });
+    for (const body of [{}, { answer: ' ' }, { answer: 123 }, { answer: 'a'.repeat(81) },
+      { answer: '\uFDFA'.repeat(80) }, { answer: 'Lab', score: 800 }]) {
+      assert.equal((await client.request(path, body)).status, 400);
+    }
+    assert.equal((await client.request(path, { answer: 'Lab' }, { Origin: 'https://foreign.example' })).status, 403);
+    assert.equal((await stranger.request(path, { answer: 'Lab' })).status, 404);
+    assert.equal((await guess('Lab', randomUUID())).status, 404);
+    const wrong = await guess("Moon' OR 1=1 --");
+    assert.equal(wrong.data.accepted, false);
+    assert.deepEqual(wrong.data.game.answers, []);
+    const snapshot = getPracticeChallenge('dog-breeds')!.answers;
+    snapshot[0].push('old lab');
+    await pool.execute('UPDATE practice_sessions SET answer_keys = ? WHERE id = ?', [JSON.stringify(snapshot), id]);
+    const aliases = await Promise.all([guess('old lab'), guess('  LÁBRADOR  ')]);
+    assert.equal(aliases.filter(reply => reply.data.accepted).length, 1);
+    assert.ok(aliases.some(reply => /already/i.test(reply.data.feedback.text)));
+    assert.deepEqual(aliases[0].data.game.answers, ['Labrador Retriever']);
+    assert.deepEqual(aliases[0].data.game.score, { correctness: 100, speed: 0, total: 100 });
+    now += 5049;
+    let result = aliases[0].data;
+    for (const value of ['Golden Retriever', 'German Shepherd Dog', 'Beagle', 'Poodle']) {
+      const reply = await guess(value);
+      assert.equal(reply.status, 200);
+      assert.equal(reply.data.accepted, true);
+      result = reply.data;
+    }
+    assert.equal(result.game.status, 'finished');
+    assert.equal(result.game.finishedAt, startedAt + 5049);
+    assert.deepEqual(result.game.score, { correctness: 500, speed: 249, total: 749 });
+    const [[stored]] = await pool.execute<RowDataPacket[]>('SELECT answers, score, finished_at FROM practice_sessions WHERE id = ?', [id]);
+    assert.deepEqual(stored.answers, result.game.answers);
+    assert.equal(stored.score, 749);
+    assert.equal(stored.finished_at.getTime(), result.game.finishedAt);
+    const completed = await guess('Boxer');
+    assert.equal(completed.data.accepted, false);
+    assert.deepEqual(completed.data.game, result.game);
+    const replay = (await client.request('/practice/start', { challengeId: 'solar-system-planets' })).data.game;
+    assert.notEqual(replay.id, id);
+    assert.deepEqual(replay.answers, []);
+    assert.equal((await guess('Boxer')).data.accepted, false);
+    assert.deepEqual((await client.request(`/practice/${replay.id}`)).data.game, replay);
+    now = replay.startedAt + GAME_DURATION;
+    const late = await guess('Earth', replay.id);
+    assert.equal(late.data.accepted, false);
+    assert.equal(late.data.game.status, 'finished');
+    assert.equal(late.data.game.finishedAt, now);
+    assert.deepEqual(late.data.game.answers, []);
+    assert.equal(late.data.game.score.total, 0);
+    const third = (await client.request('/practice/start', { challengeId: 'countries-m' })).data.game;
+    assert.notEqual(third.id, replay.id);
+    assert.equal(third.status, 'playing');
+    assert.equal((await guess('Mars', replay.id)).data.accepted, false);
+    assert.deepEqual((await client.request(`/practice/${third.id}`)).data.game.answers, []);
+    const after = (await client.request()).data;
+    assert.deepEqual(after.game, daily.game);
+    assert.deepEqual(after.results, daily.results);
+    const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE token_hash = ?', [client.hash]);
+    assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
   });
 });

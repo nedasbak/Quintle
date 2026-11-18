@@ -11,8 +11,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.API_PROXY_TARGET || 'http://backend:3001',
-        changeOrigin: true,
+        target: process.env.API_PROXY_TARGET || `http://127.0.0.1:${process.env.PORT || 3001}`,
       },
     },
   },

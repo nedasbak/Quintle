@@ -3,6 +3,7 @@ import { getScoreBreakdown } from './scoring.js';
 
 const ATTEMPT_KEY = 'quintle:attempt:v1';
 const RESULTS_KEY = 'quintle:results:v1';
+const PRACTICE_KEY = 'quintle:practice:v1';
 
 function read(key, fallback) {
   try {
@@ -19,6 +20,12 @@ function write(key, value) {
     // Private browsing and full storage must not prevent a game from running.
   }
 }
+
+export function getPracticeId() {
+  const id = read(PRACTICE_KEY, null);
+  return typeof id === 'string' && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(id) ? id : null;
+}
+export function savePracticeId(id) { write(PRACTICE_KEY, id); }
 
 export function newGame(now = Date.now()) {
   return { challenge: getDailyChallenge(now), status: 'ready', answers: [], startedAt: null, finishedAt: null };
