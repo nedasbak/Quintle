@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { buildAnswerIndex, getDailyChallenge, normalizeAnswer } from '../../shared/challenges.mjs';
+import { findMatchingAnswer } from '../../shared/answerMatching.mjs';
 import { calculateScore, GAME_DURATION, MAX_ANSWERS, remainingTime } from '../../shared/gameRules.mjs';
 
 interface Session extends RowDataPacket {
@@ -88,10 +89,24 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
       } else if (action === 'answer' && session && session.status !== 'completed') {
         const expired = session.status === 'expired';
         const normalized = normalizeAnswer(input!);
-        const [[answer]] = expired ? [[]] : await connection.execute<RowDataPacket[]>(
+        let [[answer]] = expired ? [[]] : await connection.execute<RowDataPacket[]>(
           'SELECT a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ? AND k.normalized_key = ?',
           [session.challenge_date, normalized],
         );
+        if (!expired && !answer) {
+          const [keys] = await connection.execute<RowDataPacket[]>(
+            'SELECT k.normalized_key, a.id AS answer_id, a.answer AS display_answer FROM answer_keys k JOIN accepted_answers a ON a.id = k.answer_id WHERE k.challenge_date = ?',
+            [session.challenge_date]);
+          const index = new Map(keys.map(key => [normalizeAnswer(key.normalized_key), String(key.answer_id)]));
+          const storedNames = new Map(keys.map(key => [key.display_answer, String(key.answer_id)]));
+          for (const variants of getDailyChallenge(Date.parse(session.challenge_date)).answers) {
+            const id = storedNames.get(variants[0]);
+            if (!id) continue;
+            for (const variant of variants) if (!index.has(normalizeAnswer(variant))) index.set(normalizeAnswer(variant), id);
+          }
+          const matchedId = findMatchingAnswer(index, normalized);
+          answer = keys.find(key => String(key.answer_id) === matchedId)!;
+        }
         const [[duplicate]] = answer ? await connection.execute<RowDataPacket[]>(
           "SELECT id FROM player_submissions WHERE session_id = ? AND answer_id = ? AND result = 'correct'", [session.id, answer.answer_id],
         ) : [[]];

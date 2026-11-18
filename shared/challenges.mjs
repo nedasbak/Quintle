@@ -1,4 +1,6 @@
 import { MAX_ANSWERS } from './gameRules.mjs';
+import { findMatchingAnswer, normalizeAnswer } from './answerMatching.mjs';
+export { normalizeAnswer } from './answerMatching.mjs';
 export { GAME_DURATION, calculateScore, remainingTime } from './gameRules.mjs';
 
 // Esamas kategorijų rinkinys naudojamas pradiniams duomenims ir senoms rezultatų nuorodoms.
@@ -11,10 +13,10 @@ export const starterChallenges = [
     placeholder: 'Type a country…',
     answers: [
       ['Madagascar'], ['Malawi'], ['Malaysia'], ['Maldives', 'the Maldives'],
-      ['Mali'], ['Malta'], ['Marshall Islands', 'the Marshall Islands'],
+      ['Mali'], ['Malta'], ['Marshall Islands', 'the Marshall Islands', 'Republic of the Marshall Islands', 'RMI'],
       ['Mauritania'], ['Mauritius'], ['Mexico'],
-      ['Micronesia', 'Federated States of Micronesia'], ['Moldova'], ['Monaco'],
-      ['Mongolia'], ['Montenegro'], ['Morocco'], ['Mozambique'], ['Myanmar', 'Burma'],
+      ['Micronesia', 'Federated States of Micronesia', 'FSM', 'Federated States of Micronesia (FSM)'], ['Moldova', 'Republic of Moldova'], ['Monaco', 'Principality of Monaco'],
+      ['Mongolia'], ['Montenegro'], ['Morocco', 'Kingdom of Morocco'], ['Mozambique'], ['Myanmar', 'Burma', 'Republic of the Union of Myanmar'],
     ],
   },
   {
@@ -23,7 +25,7 @@ export const starterChallenges = [
     category: 'Space',
     description: 'A little out-of-this-world thinking. Name five of the eight planets in our solar system.',
     placeholder: 'Type a planet…',
-    answers: [['Mercury'], ['Venus'], ['Earth', 'the Earth'], ['Mars'], ['Jupiter'], ['Saturn'], ['Uranus'], ['Neptune']],
+    answers: [['Mercury'], ['Venus'], ['Earth', 'the Earth', 'Terra', 'Tellus'], ['Mars'], ['Jupiter'], ['Saturn'], ['Uranus', 'Georgium Sidus'], ['Neptune']],
   },
   {
     title: 'Countries in South America',
@@ -32,9 +34,9 @@ export const starterChallenges = [
     description: 'Head south. Name five different sovereign countries on the South American continent.',
     placeholder: 'Type a country…',
     answers: [
-      ['Argentina'], ['Bolivia'], ['Brazil', 'Brasil'], ['Chile'], ['Colombia'],
-      ['Ecuador'], ['Guyana'], ['Paraguay'], ['Peru', 'Perú'], ['Suriname', 'Surinam'],
-      ['Uruguay'], ['Venezuela'],
+      ['Argentina'], ['Bolivia', 'Plurinational State of Bolivia'], ['Brazil', 'Brasil'], ['Chile'], ['Colombia'],
+      ['Ecuador'], ['Guyana', 'Co-operative Republic of Guyana'], ['Paraguay'], ['Peru', 'Perú'], ['Suriname', 'Surinam', 'Republic of Suriname'],
+      ['Uruguay', 'Oriental Republic of Uruguay'], ['Venezuela', 'Bolivarian Republic of Venezuela'],
     ],
   },
 ];
@@ -48,11 +50,6 @@ export function getDailyChallenge(now = Date.now()) {
   const offset = Math.floor((Date.parse(date) - EPOCH) / DAY);
   const index = ((offset % starterChallenges.length) + starterChallenges.length) % starterChallenges.length;
   return { ...starterChallenges[index], date, number: Math.max(1, offset + 1) };
-}
-
-// Rašybos registras, diakritiniai ženklai ir papildomi tarpai suvienodinami.
-export function normalizeAnswer(answer) {
-  return answer.normalize('NFKD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 // Check curated lists before publishing: aliases must identify exactly one canonical answer.
@@ -82,7 +79,7 @@ export function buildAnswerIndex(answers, requiredAnswers = MAX_ANSWERS) {
 // Aliases, accents, casing, and spacing resolve before checking previous submissions.
 export function validateAnswer(challenge, input, accepted) {
   const index = buildAnswerIndex(challenge.answers);
-  const answer = index.get(normalizeAnswer(input));
+  const answer = findMatchingAnswer(index, input);
   if (!answer) return { error: 'Not quite. Try another answer.' };
   if (accepted.some(previous => index.get(normalizeAnswer(previous)) === answer)) return { error: 'Already on your list. Think of another!' };
   return { answer };

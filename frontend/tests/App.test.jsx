@@ -75,7 +75,7 @@ describe('server-connected game interface', () => {
     await advance(5000);
     expect(screen.getByRole('button', { name: 'Start challenge' })).toBeDisabled();
     expect(screen.getByRole('textbox', { name: /your answer/i })).toBeDisabled();
-    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.getByText(message)).toBeInTheDocument();
     await start();
     expect(api.startGame).not.toHaveBeenCalled();
@@ -85,12 +85,25 @@ describe('server-connected game interface', () => {
   });
   it('loads the challenge without starting the clock', async () => {
     await mount();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Name 5 countries beginning with M');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Ready to play?');
     expect(within(screen.getByRole('list', { name: 'Your five answers' })).getAllByRole('listitem')).toHaveLength(5);
     expect(screen.getByRole('textbox', { name: /your answer/i })).toBeDisabled();
     await advance(5000);
-    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(api.startGame).not.toHaveBeenCalled();
+    await start();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Name 5 countries beginning with M');
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+  });
+  it('shows the corrected canonical answer and prevents another spelling from earning points', async () => {
+    await mount();
+    await start();
+    await answer('Madagscar');
+    expect(screen.getByRole('list', { name: 'Your five answers' })).toHaveTextContent('Madagascar');
+    expect(screen.getByLabelText('Live score')).toHaveTextContent('100 pts');
+    await answer('Madagascar');
+    expect(screen.getByText('Already on your list. Think of another!')).toBeInTheDocument();
+    expect(screen.getByLabelText('Live score')).toHaveTextContent('100 pts');
   });
   it('focuses the input and shows server validation without duplicate points', async () => {
     await mount();

@@ -867,4 +867,34 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE token_hash = ?', [client.hash]);
     assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
   });
+  it('autocorrects daily and practice answers while storing canonical credit only once', async () => {
+    const daily = player();
+    await daily.request('/start', {});
+    const corrected = await answer(daily, 'Madagscar');
+    assert.equal(corrected.data.accepted, true);
+    assert.deepEqual(corrected.data.game.answers, ['Madagascar']);
+    assert.equal((await answer(daily, 'Madagascra')).data.accepted, false);
+    const [[stored]] = await pool.execute<RowDataPacket[]>(`SELECT s.submitted_text, s.normalized_text, a.answer
+      FROM player_submissions s JOIN accepted_answers a ON a.id = s.answer_id
+      JOIN game_sessions g ON g.id = s.session_id JOIN players p ON p.id = g.player_id
+      WHERE p.token_hash = ? AND s.result = 'correct'`, [daily.hash]);
+    assert.deepEqual([stored.submitted_text, stored.normalized_text, stored.answer], ['Madagscar', 'madagscar', 'Madagascar']);
+    assert.equal((await answer(daily, 'FSM')).data.accepted, true);
+    assert.equal((await answer(daily, 'Federated States of Micronesia')).data.accepted, false);
+    const client = player();
+    const before = (await client.request()).data;
+    const { id } = (await client.request('/practice/start', { challengeId: 'programming-languages' })).data.game;
+    const guess = (answer: string) => client.request(`/practice/${id}/answers`, { answer });
+    assert.equal((await guess('brainfck')).data.accepted, true);
+    assert.equal((await guess('Brainfuck')).data.accepted, false);
+    assert.equal((await guess('Chef')).data.accepted, true);
+    assert.equal((await guess('holy c')).data.accepted, true);
+    assert.equal((await guess('HolyC')).data.accepted, false);
+    assert.equal((await guess('C')).data.accepted, true);
+    const completed = (await guess('C++')).data.game;
+    assert.equal(completed.status, 'finished');
+    assert.deepEqual(completed.answers, ['Brainfuck', 'Chef', 'HolyC', 'C', 'C++']);
+    assert.equal(completed.score.correctness, 500);
+    assert.deepEqual((await client.request()).data, before);
+  });
 });

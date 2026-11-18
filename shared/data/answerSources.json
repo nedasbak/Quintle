@@ -1,0 +1,46 @@
+{
+  "reviewed": "2026-11-18",
+  "programmingLanguages": [
+    "https://github.com/github-linguist/linguist/blob/main/lib/linguist/languages.yml",
+    "https://www.dangermouse.net/esoteric/",
+    "https://www.dangermouse.net/esoteric/chef.html"
+  ],
+  "animals": [
+    "https://www.akc.org/dog-breeds/",
+    "https://fci.be/en/nomenclature/Default.aspx",
+    "https://www.bearbiology.org/the-eight-bear-species/",
+    "https://www.worldwildlife.org/resources/facts/where-do-rhinos-live-and-eight-other-rhino-facts/"
+  ],
+  "instruments": [
+    "https://www.metmuseum.org/art/collection/search?q=musical+instruments",
+    "https://philharmonia.co.uk/resources/instruments/"
+  ],
+  "scienceAndSpace": [
+    "https://science.nasa.gov/dwarf-planets/",
+    "https://science.nasa.gov/uranus/moons/facts/",
+    "https://science.nasa.gov/moon/moon-walkers/",
+    "https://www.nist.gov/pml/special-publication-330/sp-330-section-2"
+  ],
+  "gaming": [
+    "https://help.minecraft.net/hc/en-us/articles/360046470431-Minecraft-Types-of-Biomes",
+    "https://www.pokemon.com/pokedex/",
+    "https://www.stardewvalley.net/about/",
+    "https://www.nintendo.co.jp/n01/n64/software/nus_p_nmkj/index.html"
+  ],
+  "food": [
+    "https://www.cordonbleu.edu/news/what-are-the-mother-sauces-of-french-cooking/en",
+    "https://www.barillaforprofessionals.com/media/en-us/filer_public/96/99/9699d2fe-c3e7-4e45-ba5a-774bd1edb2c1/final_barilla_full_line_poster.pdf"
+  ],
+  "music": [
+    "https://www.thebeatles.com/albums",
+    "https://abbasite.com/discography/",
+    "https://www.universzero.dk/press/UniversZero-RELAPS-PR-FINAL.pdf"
+  ],
+  "literature": [
+    "https://www.harrypotter.com/fact-file/characters-and-pets",
+    "https://www.harrypotter.com/news/every-single-voice-you-hear-in-harry-potter-the-full-cast-audio-editions",
+    "https://jasna.org/austen/works/",
+    "https://www.orwellfoundation.com/the-orwell-foundation/orwell/books-by-orwell/",
+    "https://www.rsc.org.uk/shakespeares-plays/"
+  ]
+}
