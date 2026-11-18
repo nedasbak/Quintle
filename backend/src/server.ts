@@ -30,7 +30,7 @@ const app = createApp(createGameService(pool));
 const frontend = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
 app.use(express.static(frontend));
 app.get('/', (_request, response) => response.sendFile('index.html', { root: frontend }));
-const server = app.listen(port, process.env.HOST || '127.0.0.1', () => console.log(`Quintle API listening on port ${port}`));
+const server = app.listen(port, '0.0.0.0', () => console.log(`Quintle API listening on port ${port}`));
 
 // Stabdant procesą uždaromos HTTP ir duomenų bazės jungtys.
 function shutdown() {
