@@ -1,0 +1,74 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/dockerfile
+    container_name: quintle-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      API_PROXY_TARGET: http://backend:3001
+    depends_on:
+      - backend
+    networks:
+      - quintle-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/dockerfile
+    container_name: quintle-backend
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: mysql://quintle_user:quintle_password@mysql:3306/quintle
+      PORT: 3001
+      HOST: 0.0.0.0
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - quintle-network
+
+  mysql:
+    image: mysql:8.4
+    container_name: quintle-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: quintle
+      MYSQL_USER: quintle_user
+      MYSQL_PASSWORD: quintle_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-proot_password" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - quintle-network
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: quintle-phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - quintle-network
+
+networks:
+  quintle-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
