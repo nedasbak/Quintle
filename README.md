@@ -103,6 +103,10 @@ Fresh imports of `schema.sql` already include these migrations; do not apply the
 
 ## Scoring and tests
 
+Accepted answers use explicit aliases plus case, accent, and whitespace normalization. Near-miss
+words are rejected. New starter lists are checked for enough distinct answers, ambiguous aliases,
+and database field limits before insertion; duplicate aliases never earn another answer slot.
+
 The score is `floor(correct answers × 100 + remaining milliseconds / 1000 × 10)`.
 The remaining time is limited to 0–30 seconds. A timeout has no speed bonus.
 For example, five answers completed in 5.049 seconds earn 749 points. The maximum is 800.

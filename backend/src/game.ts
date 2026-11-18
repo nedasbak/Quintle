@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { getDailyChallenge, normalizeAnswer } from '../../shared/challenges.mjs';
+import { buildAnswerIndex, getDailyChallenge, normalizeAnswer } from '../../shared/challenges.mjs';
 import { calculateScore, GAME_DURATION, MAX_ANSWERS, remainingTime } from '../../shared/gameRules.mjs';
 
 interface Session extends RowDataPacket {
@@ -25,6 +25,7 @@ async function ensureChallenge(connection: PoolConnection, now: number) {
     [challenge.date, challenge.category, `Name ${MAX_ANSWERS} ${challenge.title.charAt(0).toLowerCase()}${challenge.title.slice(1)}`],
   );
   if (!insert.affectedRows) return;
+  buildAnswerIndex(challenge.answers, MAX_ANSWERS);
   for (const variants of challenge.answers) {
     const [answer] = await connection.execute<ResultSetHeader>(
       'INSERT INTO accepted_answers (challenge_id, challenge_date, answer) VALUES (?, ?, ?)',
