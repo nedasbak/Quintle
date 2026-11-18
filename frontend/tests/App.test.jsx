@@ -62,6 +62,27 @@ async function answer(value) {
 async function advance(milliseconds) { await act(async () => vi.advanceTimersByTime(milliseconds)); }
 
 describe('server-connected game interface', () => {
+  it('disables unavailable challenges and checks again without starting an attempt', async () => {
+    const { newGame } = await import('../src/features/game/storage.js');
+    const message = "Today's challenge is unavailable. Please check again later.";
+    const payload = { game: { ...newGame(), status: 'unavailable',
+      score: { correctness: 0, speed: 0, total: 0 } }, serverNow: Date.now(), accepted: false,
+      feedback: { kind: 'hint', text: message }, results: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => payload })));
+    const realApi = await vi.importActual('../src/features/game/api.js');
+    vi.mocked(api.getGame).mockResolvedValueOnce(await realApi.getGame());
+    await mount();
+    await advance(5000);
+    expect(screen.getByRole('button', { name: 'Start challenge' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: /your answer/i })).toBeDisabled();
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '30 seconds remaining');
+    expect(screen.getByText(message)).toBeInTheDocument();
+    await start();
+    expect(api.startGame).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Check again' })));
+    expect(screen.getByRole('button', { name: 'Start challenge' })).toBeEnabled();
+    expect(api.startGame).not.toHaveBeenCalled();
+  });
   it('loads the challenge without starting the clock', async () => {
     await mount();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Name 5 countries beginning with M');

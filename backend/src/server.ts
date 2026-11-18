@@ -15,7 +15,7 @@ const port = Number(process.env.PORT || 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port.');
 const pool = createPool({ host: url.hostname, port: Number(url.port || 3306), user: decodeURIComponent(url.username), password: decodeURIComponent(url.password),
   database: decodeURIComponent(url.pathname.slice(1)), timezone: 'Z', dateStrings: ['DATE'], connectionLimit: 10 });
-await pool.query('SELECT session_id, score, remaining_seconds FROM game_sessions LIMIT 0');
+await pool.query('SELECT id, score, remaining_seconds FROM game_sessions LIMIT 0');
 // Sena sveikų sekundžių schema sustabdoma prieš priimant žaidėjų užklausas.
 const [columns] = await pool.query<import('mysql2/promise').RowDataPacket[]>(
   "SELECT NUMERIC_SCALE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'game_sessions' AND COLUMN_NAME = 'remaining_seconds'",

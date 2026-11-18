@@ -3,6 +3,7 @@ import express from 'express';
 import type { ErrorRequestHandler, Request, Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { MAX_ANSWER_LENGTH } from '../../shared/gameRules.mjs';
+import { normalizeAnswer } from '../../shared/challenges.mjs';
 import type { createGameService } from './game.ts';
 
 // Anoniminį žaidėją identifikuoja HttpOnly slapukas; duomenų bazėje lieka tik jo maiša.
@@ -48,7 +49,8 @@ export function createApp(play: ReturnType<typeof createGameService>) {
     if (Object.keys(request.body).some(key => key !== 'answer') || typeof answer !== 'string' || !answer.trim() || answer.length > MAX_ANSWER_LENGTH) {
       return response.status(400).json({ error: `Send one answer of up to ${MAX_ANSWER_LENGTH} characters.` });
     }
-    response.json(await play(playerHash(request, response), 'answer', answer.trim()));
+    if ([...normalizeAnswer(answer)].length > 255) return response.status(400).json({ error: 'Answer is too long after normalization.' });
+    response.json(await play(playerHash(request, response), 'answer', answer));
   });
   app.use('/api', (_request, response) => response.status(404).json({ error: 'API route was not found.' }));
 

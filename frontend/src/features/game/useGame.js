@@ -81,7 +81,7 @@ export default function useGame() {
   // Dvigubas paspaudimas nepradeda naujo bandymo ir nepateikia atsakymo antrą kartą.
   const start = () => gameRef.current?.status === 'ready' ? run(startGame) : Promise.resolve(false);
   const submit = answer => gameRef.current?.status === 'playing' ? run(signal => submitAnswer(answer, signal)) : Promise.resolve(false);
-  const remaining = !game || game.status === 'ready' ? GAME_DURATION
+  const remaining = !game || game.startedAt === null ? GAME_DURATION
     : remainingTime(game.startedAt, game.status === 'finished' ? game.finishedAt : now);
 
   return { game, now, remaining, feedback, pending, error, refresh, start, submit };
