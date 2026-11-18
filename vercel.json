@@ -5,13 +5,13 @@
       "root": "backend",
       "framework": "express",
       "entrypoint": "src/index.ts",
-      "installCommand": "cd .. && npm ci",
+      "installCommand": "cd .. && npm ci --include=dev --workspaces --include-workspace-root",
       "buildCommand": "npm run build"
     },
     "frontend": {
       "root": "frontend",
       "framework": "vite",
-      "installCommand": "cd .. && npm ci",
+      "installCommand": "cd .. && npm ci --include=dev --workspaces --include-workspace-root",
       "buildCommand": "npm run build",
       "outputDirectory": "dist"
     }
