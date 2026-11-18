@@ -85,9 +85,22 @@ function GameApp() {
         {finished ? <Results key={game.id ?? challenge.date} game={game} remaining={remaining} now={now} /> : (
           <section className="game-screen" aria-labelledby="challenge-title">
             <div className="challenge-heading">
-              <Countdown remaining={remaining} status={status} />
-              <h1 id="challenge-title">{prompt}</h1>
-              <p>Be quick. Be accurate. Think differently.</p>
+              {playing ? (
+                <>
+                  <Countdown remaining={remaining} status={status} />
+                  <h1 id="challenge-title">{prompt}</h1>
+                  <p>Be quick. Be accurate. Think differently.</p>
+                </>
+              ) : (
+                <>
+                  <h1 id="challenge-title">
+                    {status === 'ready' ? 'Ready to play?' : 'Challenge unavailable'}
+                  </h1>
+                  {status === 'ready' && (
+                    <p>Press Begin when you're ready to reveal the question.</p>
+                  )}
+                </>
+              )}
             </div>
 
             <AnswerSlots answers={answers} status={status} challengeDate={challenge.date} />
