@@ -8,11 +8,12 @@
 
 ## Setup and run
 
-Start MySQL, then run from the project folder in Windows PowerShell:
+For a fresh database, start MySQL and run from the project folder in Windows PowerShell:
 
 ```powershell
 npm.cmd install
-mysql -u root -p -e "source backend/database/schema.sql; source backend/database/seed.sql;"
+mysql -u root -p -e "source backend/database/schema.sql"
+mysql -u root -p -e "source backend/database/seed.sql"
 $env:DATABASE_URL = 'mysql://root:YOUR_PASSWORD@127.0.0.1:3306/quintle'
 npm.cmd run dev
 ```
@@ -20,8 +21,9 @@ npm.cmd run dev
 Replace `YOUR_PASSWORD` with your MySQL password; URL-encode special characters.
 Open **http://127.0.0.1:5173**. The API runs on port **3001**.
 
-Fresh databases need no migrations. Existing databases need pending migrations in
-`backend/database/migrations/`, in numeric order; run migration 010 with Node.js.
+Existing databases: stop the API, back up, then apply only pending migrations in
+`backend/database/migrations/` in numeric order. With `DATABASE_URL` set, run 010 using
+`node backend/database/migrations/010_submission_details.ts`. Fresh databases need no migrations.
 
 ## Build and start
 
