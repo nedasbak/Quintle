@@ -3,6 +3,7 @@ import express from 'express';
 import { createPool } from 'mysql2/promise';
 import { createApp } from './app.ts';
 import { createGameService } from './game.ts';
+import { createPracticeService } from './practice.ts';
 
 // Prisijungimas ir serverio adresas gaunami iš aplinkos, paslapčių kode nėra.
 const databaseUrl = process.env.DATABASE_URL;
@@ -24,7 +25,7 @@ if (Number(columns[0]?.NUMERIC_SCALE) !== 3) {
   await pool.end();
   throw new Error('Apply backend/database/migrations/001_precise_scoring.sql before starting the API.');
 }
-const app = createApp(createGameService(pool));
+const app = createApp(createGameService(pool), createPracticeService(pool));
 
 // Tas pats serveris gali pateikti ir sukompiliuotą naršyklės sąsają.
 const frontend = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));

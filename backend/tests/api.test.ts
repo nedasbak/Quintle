@@ -11,6 +11,7 @@ import { createPool } from 'mysql2/promise';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { createApp } from '../src/app.ts';
 import { createGameService } from '../src/game.ts';
+import { createPracticeService } from '../src/practice.ts';
 import { GAME_DURATION } from '../../shared/gameRules.mjs';
 import { getDailyChallenge } from '../../shared/challenges.mjs';
 import { getPracticeChallenge } from '../../shared/practiceChallenges.mjs';
@@ -30,7 +31,7 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
   const play = createGameService(pool, () => now);
 
   before(async () => {
-    server = createApp(play).listen(0, '127.0.0.1');
+    server = createApp(play, createPracticeService(pool, () => now)).listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing HTTP test address.');
@@ -752,5 +753,52 @@ describe('server and MySQL scoring', { skip: databaseUrl ? false : 'Run npm run 
     assert.deepEqual((await client.request()).data, daily);
     const [[stats]] = await pool.execute<RowDataPacket[]>('SELECT total_games, total_score, current_streak FROM players WHERE id = ?', [owner.id]);
     assert.deepEqual({ ...stats }, { total_games: 0, total_score: 0, current_streak: 0 });
+  });
+  it('starts and restores owned practice rounds without resetting timers or daily progress', async () => {
+    const client = player(), stranger = player();
+    const daily = (await client.request()).data;
+    for (const body of [{}, { challengeId: 'missing' }, { challengeId: 'dog-breeds', score: 800 }]) {
+      assert.equal((await client.request('/practice/start', body)).status, 400);
+    }
+    const [first, concurrent] = await Promise.all([
+      client.request('/practice/start', { challengeId: 'dog-breeds' }),
+      client.request('/practice/start', { challengeId: 'solar-system-planets' }),
+    ]);
+    assert.equal(first.status, 200);
+    assert.equal(concurrent.status, 200);
+    assert.deepEqual(concurrent.data.game, first.data.game);
+    const game = first.data.game;
+    assert.equal(game.mode, 'practice');
+    assert.equal(game.status, 'playing');
+    assert.equal(game.startedAt, now);
+    assert.deepEqual(game.answers, []);
+    assert.deepEqual(Object.keys(game).sort(), ['answers', 'challenge', 'finishedAt', 'id', 'mode', 'score', 'startedAt', 'status']);
+    assert.deepEqual(Object.keys(game.challenge).sort(), ['category', 'date', 'id', 'number', 'prompt', 'theme']);
+    assert.equal(Object.hasOwn(first.data, 'results'), false);
+    now += 5049;
+    const read = await client.request(`/practice/${game.id}`);
+    assert.deepEqual(read.data.game, game);
+    const [resumed, dailyRead] = await Promise.all([
+      client.request('/practice/start', { challengeId: 'countries-m' }), client.request(),
+    ]);
+    assert.equal(dailyRead.status, 200);
+    assert.deepEqual(dailyRead.data.game, daily.game);
+    assert.deepEqual(resumed.data.game, game);
+    assert.equal((await stranger.request(`/practice/${game.id}`)).status, 404);
+    assert.equal((await client.request(`/practice/${randomUUID()}`)).status, 404);
+    now = game.startedAt + GAME_DURATION;
+    const expired = await client.request(`/practice/${game.id}`);
+    assert.equal(expired.data.game.status, 'finished');
+    assert.equal(expired.data.game.finishedAt, now);
+    assert.equal(expired.data.game.score.total, 0);
+    const replay = await client.request('/practice/start', { challengeId: 'dog-breeds' });
+    assert.equal(replay.status, 200);
+    assert.notEqual(replay.data.game.id, game.id);
+    assert.equal(replay.data.game.startedAt, now);
+    assert.equal(replay.data.game.challenge.id, 'dog-breeds');
+    assert.deepEqual((await client.request(`/practice/${game.id}`)).data.game, expired.data.game);
+    const after = (await client.request()).data;
+    assert.deepEqual(after.game, daily.game);
+    assert.deepEqual(after.results, daily.results);
   });
 });

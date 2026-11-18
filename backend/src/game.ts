@@ -45,7 +45,7 @@ export function createGameService(pool: Pool, clock: () => number = Date.now) {
     try {
       await connection.query("SET time_zone = '+00:00'");
       await connection.beginTransaction();
-      await connection.execute('INSERT IGNORE INTO players (id, token_hash) VALUES (?, ?)', [randomUUID(), tokenHash]);
+      await connection.execute('INSERT INTO players (id, token_hash) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id', [randomUUID(), tokenHash]);
       const [[player]] = await connection.execute<RowDataPacket[]>(
         'SELECT id AS player_id FROM players WHERE token_hash = ? FOR UPDATE', [tokenHash],
       );

@@ -4,8 +4,9 @@ import type { ErrorRequestHandler, Request, Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { MAX_ANSWER_LENGTH } from '../../shared/gameRules.mjs';
 import { normalizeAnswer } from '../../shared/challenges.mjs';
-import { getPracticeThemes } from '../../shared/practiceChallenges.mjs';
+import { getPracticeChallenge, getPracticeThemes } from '../../shared/practiceChallenges.mjs';
 import type { createGameService } from './game.ts';
+import type { createPracticeService } from './practice.ts';
 
 // Anoniminį žaidėją identifikuoja HttpOnly slapukas; duomenų bazėje lieka tik jo maiša.
 function playerHash(request: Request, response: Response) {
@@ -17,7 +18,7 @@ function playerHash(request: Request, response: Response) {
   return createHash('sha256').update(token).digest();
 }
 
-export function createApp(play: ReturnType<typeof createGameService>) {
+export function createApp(play: ReturnType<typeof createGameService>, practice?: ReturnType<typeof createPracticeService>) {
   const app = express();
   app.disable('x-powered-by');
   app.use('/api', (_request, response, next) => {
@@ -41,6 +42,19 @@ export function createApp(play: ReturnType<typeof createGameService>) {
     next();
   });
   app.get('/api/game/themes', (_request, response) => response.json({ themes: getPracticeThemes() }));
+  app.post('/api/game/practice/start', async (request, response) => {
+    const { challengeId } = request.body;
+    if (Object.keys(request.body).some(key => key !== 'challengeId') || typeof challengeId !== 'string' || !getPracticeChallenge(challengeId)) {
+      return response.status(400).json({ error: 'Choose a valid practice challenge.' });
+    }
+    if (!practice) return response.status(503).json({ error: 'Practice is unavailable.' });
+    response.json(await practice(playerHash(request, response), 'start', challengeId));
+  });
+  app.get('/api/game/practice/:sessionId', async (request, response) => {
+    if (!practice) return response.status(503).json({ error: 'Practice is unavailable.' });
+    const result = await practice(playerHash(request, response), 'read', request.params.sessionId as string);
+    response.status(result.game ? 200 : 404).json(result.game ? result : { error: 'Practice round not found.' });
+  });
   app.get('/api/game', async (request, response) => response.json(await play(playerHash(request, response), 'read')));
   app.post('/api/game/start', async (request, response) => {
     if (Object.keys(request.body).length) return response.status(400).json({ error: 'Start does not accept game data.' });

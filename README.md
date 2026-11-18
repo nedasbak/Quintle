@@ -31,7 +31,6 @@ Open **http://127.0.0.1:5173**. The API runs on port **3001**.
 Existing databases: stop the API, back up, then apply only pending migrations in
 `backend/database/migrations/` in numeric order. With `DATABASE_URL` set, run 010 using
 `node backend/database/migrations/010_submission_details.ts`. Fresh databases need no migrations.
-Migration `019_practice_sessions.sql` adds storage for unlimited practice rounds.
 
 ## Build and start
 
